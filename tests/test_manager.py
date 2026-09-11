@@ -32,14 +32,14 @@ def test_failed_item_isolated(tmp_path, write_tif, write_tif_no_crs):
 
     # no-CRS item fails alone, campaign still builds
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2020-01-01") == {"rebuilt": 1, "reused": 0, "stale": 0, "failed": 1}, res
+    assert _counts(res, "2020-01-01") == {"rebuilt": 1, "refreshed": 0, "reused": 0, "stale": 0, "failed": 1}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     assert {i.id for i in cat.get_items(recursive=True)} == {"pielach_2020-01-01_dtm_etrs89"}
 
     # sidecar crs fallback rescues it; the sidecar edit rebuilds the whole campaign
     (camp / "campaign.yaml").write_text('crs: "EPSG:31256"\n', encoding="utf-8")
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2020-01-01") == {"rebuilt": 2, "reused": 0, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2020-01-01") == {"rebuilt": 2, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     item = next(i for i in cat.get_items(recursive=True) if i.id.endswith("dsm_etrs89"))
     assert item.properties["proj:code"] == "EPSG:31256"
@@ -50,7 +50,7 @@ def test_failed_item_isolated(tmp_path, write_tif, write_tif_no_crs):
     write_tif_no_crs(camp2 / "pielach_2021-02-02_dtm_etrs89.tif")
     (camp2 / "campaign.yaml").write_text("", encoding="utf-8")
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2021-02-02") == {"rebuilt": 0, "reused": 0, "stale": 0, "failed": 1}, res
+    assert _counts(res, "2021-02-02") == {"rebuilt": 0, "refreshed": 0, "reused": 0, "stale": 0, "failed": 1}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     assert cat.get_child("catalog_2021-02-02") is None
 
@@ -131,7 +131,7 @@ def test_new_product_type_from_sidecar_only(tmp_path, write_tif):
 
     # default registry: no pattern matches the file, so the campaign stays empty
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2024-10-09") == {"rebuilt": 0, "reused": 0, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2024-10-09") == {"rebuilt": 0, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
     assert not (out / "catalog.json").exists() or not list(
         pystac.Catalog.from_file(str(out / "catalog.json")).get_items(recursive=True))
 
@@ -151,7 +151,7 @@ def test_new_product_type_from_sidecar_only(tmp_path, write_tif):
         encoding="utf-8")
 
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2024-10-09") == {"rebuilt": 1, "reused": 0, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2024-10-09") == {"rebuilt": 1, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     item = next(iter(cat.get_items(recursive=True)))
     assert item.id == "pielach_2024-10-09_bathy_depth"
@@ -259,7 +259,7 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
 
     # run 1: full build, broken campaign isolated
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 5, "reused": 0, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 5, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
     assert "2023-05-05_broken" in res["failed"]
 
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
@@ -284,7 +284,7 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
 
     # run 2: no-op, everything reused, timestamps untouched
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "reused": 5, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "refreshed": 0, "reused": 5, "stale": 0, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     item = next(i for i in cat.get_items(recursive=True) if i.id == "pielach_2023-02-08_dtm_etrs89")
     assert (item.properties["created"], item.properties["updated"]) == (created0, updated0)
@@ -297,7 +297,7 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
     # content change at constant size -> hash path rebuilds exactly that item
     write_tif(camp_dir / "pielach_2023-02-08_dtm_etrs89.tif", 99)
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 1, "reused": 4, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 1, "refreshed": 0, "reused": 4, "stale": 0, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     item = next(i for i in cat.get_items(recursive=True) if i.id == "pielach_2023-02-08_dtm_etrs89")
     assert item.properties["created"] == created0, "created survives rebuilds"
@@ -306,7 +306,7 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
     # deleted file: default warn keeps the item, remove drops it
     (camp_dir / "pielach_2023-02-08_dsm_etrs89.tif").unlink()
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "reused": 4, "stale": 1, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "refreshed": 0, "reused": 4, "stale": 1, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     assert len(list(cat.get_items(recursive=True))) == 5
 
@@ -325,12 +325,12 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
 
     # force skips the gate, everything rebuilds
     res = update_catalog(tmp_path, out, RunPolicy(force=True))
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 4, "reused": 0, "stale": 0, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 4, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
 
     # kept-stale tile stays inside its subcollection (no flat drift)
     (camp_dir / "pielach_2023-02-08_tiles" / "pielach_2023-02-08_dtm_1_3.tif").unlink()
     res = update_catalog(tmp_path, out, RunPolicy())
-    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "reused": 3, "stale": 1, "failed": 0}, res
+    assert _counts(res, "2023-02-08_test") == {"rebuilt": 0, "refreshed": 0, "reused": 3, "stale": 1, "failed": 0}, res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     camp = cat.get_child("catalog_2023-02-08")
     assert {i.id for i in camp.get_items()} == {"pielach_2023-02-08_dtm_etrs89"}
@@ -360,6 +360,118 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
     assert not res["failed"] and res["stale_collections"] == ["catalog_2023-02-08"], res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     assert cat.get_child("catalog_2023-02-08") is None
+
+
+def test_sidecar_refresh(tmp_path, write_tif, monkeypatch):
+    """A properties edit is reconciled against the item it produced: patched in place,
+    no reader call and no rehash. labels and crs stay on the campaign-wide digest, and
+    a registry LABELS change is caught by the asset shape check."""
+    from turnstac.catalog import build
+    from turnstac.core import registry
+
+    out = tmp_path / "catalog"
+    camp = tmp_path / "2025-03-03"
+    camp.mkdir()
+    write_tif(camp / "pielach_2025-03-03_dtm_etrs89.tif", 10)
+    write_tif(camp / "pielach_2025-03-03_dsm_etrs89.tif", 20)
+    sidecar = camp / "campaign.yaml"
+    dtm_id, dsm_id = "pielach_2025-03-03_dtm_etrs89", "pielach_2025-03-03_dsm_etrs89"
+
+    def _item(iid):
+        cat = pystac.Catalog.from_file(str(out / "catalog.json"))
+        return next(i for i in cat.get_items(recursive=True) if i.id == iid)
+
+    def _run():
+        return _counts(update_catalog(tmp_path, out, RunPolicy()), "2025-03-03")
+
+    def _c(rebuilt=0, refreshed=0, reused=0):
+        return {"rebuilt": rebuilt, "refreshed": refreshed, "reused": reused,
+                "stale": 0, "failed": 0}
+
+    # a reader call is what a refresh must never cost
+    read = []
+    real = build.readers["raster"]
+    monkeypatch.setitem(build.readers, "raster",
+                        lambda path, **kw: (read.append(path), real(path, **kw))[1])
+
+    sidecar.write_text("properties:\n  platform: airborne\n", encoding="utf-8")
+    assert _run() == _c(rebuilt=2)
+
+    # byId edit on one item: only that item is touched, and no reader runs
+    read.clear()
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: airborne\n"
+        "  byId:\n"
+        f"    {dtm_id}:\n"
+        "      title: DTM, retitled\n", encoding="utf-8")
+    assert _run() == _c(refreshed=1, reused=1)
+    assert not read, "refresh read the data file"
+    assert _item(dtm_id).properties["title"] == "DTM, retitled"
+
+    # convergence: the refreshed item satisfies the gate next run
+    assert _run() == _c(reused=2)
+
+    # a byId entry for an item that had none
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: airborne\n"
+        "  byId:\n"
+        f"    {dtm_id}:\n"
+        "      title: DTM, retitled\n"
+        f"    {dsm_id}:\n"
+        "      mission: second pass\n", encoding="utf-8")
+    assert _run() == _c(refreshed=1, reused=1)
+    assert _item(dsm_id).properties["mission"] == "second pass"
+
+    # campaign-wide edit reaches every item, still without a reader
+    read.clear()
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: helicopter\n"
+        "  byId:\n"
+        f"    {dtm_id}:\n"
+        "      title: DTM, retitled\n"
+        f"    {dsm_id}:\n"
+        "      mission: second pass\n", encoding="utf-8")
+    assert _run() == _c(refreshed=2)
+    assert not read, "refresh read the data file"
+    assert _item(dtm_id).properties["platform"] == "helicopter"
+    assert _item(dsm_id).properties["platform"] == "helicopter"
+
+    # dropping a title override falls back to the generated title (the one removal a
+    # subset check can notice, because the builder always writes a title)
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: helicopter\n"
+        "  byId:\n"
+        f"    {dsm_id}:\n"
+        "      mission: second pass\n", encoding="utf-8")
+    assert _run() == _c(refreshed=1, reused=1)
+    assert _item(dtm_id).properties["title"] == "dtm 2025-03-03"
+
+    # labels and crs stay on the digest: either rebuilds the whole campaign
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: helicopter\n"
+        "labels:\n"
+        "  shade:\n"
+        "    category: ignore\n", encoding="utf-8")
+    assert _run() == _c(rebuilt=2)
+    sidecar.write_text(
+        "properties:\n"
+        "  platform: helicopter\n"
+        "labels:\n"
+        "  shade:\n"
+        "    category: ignore\n"
+        "crs: EPSG:31256\n", encoding="utf-8")
+    assert _run() == _c(rebuilt=2)
+    assert _run() == _c(reused=2)
+
+    # a LABELS default edit never reaches the digest; the asset shape check catches it
+    monkeypatch.setitem(registry.LABELS["dtm"], "stac_roles", ["data", "reflectance"])
+    assert _run() == _c(rebuilt=1, reused=1)
+    assert _item(dtm_id).assets["dtm"].roles == ["data", "reflectance"]
 
 
 def test_failed_campaign_queues_no_thumbnails(tmp_path, write_tif):
@@ -424,7 +536,7 @@ def test_tiled_pcl_subcollection_thumbnail(tmp_path, write_las, monkeypatch):
                            bbox=[15.4, 48.2, 15.4, 48.2],
                            datetime=datetime(2024, 10, 9, tzinfo=timezone.utc), properties={})
         item.add_asset(a.label, pystac.Asset(
-            href=str(a.path), roles=["data"],
+            href=str(a.path), media_type=a.media_type, roles=["data"],
             extra_fields={"file:size": fm.size, "file:checksum": "1220" + fm.sha256}))
         return item
 
@@ -442,6 +554,12 @@ def test_tiled_pcl_subcollection_thumbnail(tmp_path, write_las, monkeypatch):
     update_catalog(tmp_path, out, RunPolicy())
     assert png.stat().st_mtime_ns == stamp
     assert _coll_asset_href(out, "pielach_2024-10-09_tiles", "thumbnail") == thumb
+
+    # a properties edit refreshes the members in place, so the aggregate is not re-rendered
+    (camp / "campaign.yaml").write_text("properties:\n  platform: airborne\n", encoding="utf-8")
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert res["ok"]["2024-10-09"]["rebuilt"] == 0 and res["ok"]["2024-10-09"]["refreshed"] == 3
+    assert png.stat().st_mtime_ns == stamp
 
     # a member's content changes -> re-render
     write_las(tiles / "pielach_2024-10-09_pcl_0.las", n=20_001)

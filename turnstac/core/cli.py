@@ -124,8 +124,8 @@ def main():
     # Summary
     failed_items = 0
     for name, c in ok.items():
-        log.info(f"  {name}: {c['rebuilt']} rebuilt, {c['reused']} reused, "
-                 f"{c['stale']} stale, {c['failed']} failed")
+        log.info(f"  {name}: {c['rebuilt']} rebuilt, {c['refreshed']} refreshed, "
+                 f"{c['reused']} reused, {c['stale']} stale, {c['failed']} failed")
         failed_items += c["failed"]
     if res["stale_collections"]:
         log.info(f"  stale collections: {', '.join(res['stale_collections'])}")

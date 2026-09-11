@@ -31,7 +31,7 @@ properties:
 
 
 # =============================================================================
-#  ADVANCED - rarely needed. Uncomment if needed
+#  ADVANCED - rarely needed. Uncomment if wanted
 # =============================================================================
 
 # --- keep files out of the catalog -------------------------------------------
@@ -60,6 +60,8 @@ properties:
 #
 # --- Add INSIDE "properties:":
 # --- A null value drops a key set here; extracted keys (gsd, proj:*, pc:*) stay on the item.
+# --- Editing this block patches the affected items on the next run. REMOVING a key from it
+# --- cannot be seen on the item that already carries it -> use --force
 #
 #   "pc:type": sonar           # extracted keys can be overwritten by setting them here;
 #                              # point clouds are extracted as lidar
@@ -81,9 +83,7 @@ properties:
 #   placement:                 # item id -> group name, or ~ to force the item flat
 #     pielach_2024-10-09_tile_017: pielach_2024-10-09_tiles
 #     pielach_2024-10-09_overview: ~
-#     "*_tile_*": pielach_2024-10-09_tiles    # a key holding * ? [ is an fnmatch pattern,
-#                                             # matched case-insensitively against the item id.
-#                                             # Quote it: a bare * opens a YAML alias.
+#     "*_tile_*": pielach_2024-10-09_tiles    # Quote it: a bare * opens a YAML alias.
 #                                             # exact key > pattern > automatic rule; among
 #                                             # patterns the first one in this file wins.
 #   groups:                    # metadata for the subcollection; providers and keywords

@@ -16,7 +16,9 @@ import yaml
 from ..core import config
 from ..core.capabilities import laspy_available
 from ..core.registry import merge_overrides
-from .build import build_collection, build_item, campaign_date
+from .build import (
+    _item_title, build_collection, build_item, campaign_date, merged_properties, refresh_item
+    )
 from .discover import discover, qualify_id
 from .extract import file_meta, pcl_point_count
 from .hierarchy import resolve_hierarchy
@@ -51,6 +53,7 @@ class CampaignResult:
     """What one campaign produced: counts for the run report, thumbnail jobs for the
     post-normalize drain in update_catalog()."""
     rebuilt: int = 0
+    refreshed: int = 0
     reused: int = 0
     stale: int = 0
     failed: int = 0
@@ -60,8 +63,8 @@ class CampaignResult:
 
     def counts(self) -> dict:
         """JSON-safe counts block for last_run.json (jobs dropped)."""
-        return {"rebuilt": self.rebuilt, "reused": self.reused, "stale": self.stale,
-                "failed": self.failed, "seconds": self.seconds}
+        return {"rebuilt": self.rebuilt, "refreshed": self.refreshed, "reused": self.reused,
+                "stale": self.stale, "failed": self.failed, "seconds": self.seconds}
 
 
 def load_sidecar(path) -> dict:
@@ -103,7 +106,10 @@ def _stored_file_fields(item, label: str):
     return size, mh[4:]
 
 
-_GATE_KEYS = ("patterns", "labels", "properties", "crs")
+# properties and patterns are reconciled per item instead (_needs_refresh, _asset_shape_ok):
+# a properties edit shows in the item it produced, and a patterns edit surfaces as a changed
+# asset label, a changed item id or an unmatched file. ADR 0008
+_GATE_KEYS = ("labels", "crs")
 
 
 def _sidecar_digest(sc: dict) -> str:
@@ -130,6 +136,33 @@ def _needs_rebuild(product, existing_item) -> bool:
     fm = file_meta(a.path)
     a.file_meta = fm
     return fm.sha256 != stored[1]
+
+
+def _asset_shape_ok(product, item) -> bool:
+    """The item's data asset still carries the roles and media type the registry says.
+
+    Only part of the gate that notices an edit to the LABELS defaults in registry.py,
+    which no sidecar digest covers. An asset missing under the label already fails
+    _stored_file_fields, so label and id remaps stay covered there.
+    """
+    a = product.assets[0]
+    ia = item.assets.get(a.label)
+    if ia is None:
+        return False
+    return (ia.roles or []) == list(a.stac_roles) and ia.media_type == a.media_type
+
+
+def _needs_refresh(product, item, props: dict, campaign) -> bool:
+    """The item does not yet show the sidecar's properties overlay.
+
+    Compared through a JSON round-trip: item properties come off disk as JSON types and
+    sidecar values off YAML, and a type mismatch would refresh the same item every run.
+    """
+    merged = json.loads(json.dumps(merged_properties(props, product), default=str))
+    if any(item.properties.get(k) != v for k, v in merged.items()):
+        return True
+    # no title override set: the generated one must be the current one
+    return "title" not in merged and item.properties.get("title") != _item_title(product, campaign)
 
 
 # --- per-campaign pipeline ---
@@ -180,8 +213,9 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
     thumb_jobs: list = []
     coll_thumb_jobs: list = []
 
-    def _result(rebuilt=0, reused=0, stale=0, failed=0) -> CampaignResult:
-        return CampaignResult(rebuilt=rebuilt, reused=reused, stale=stale, failed=failed,
+    def _result(rebuilt=0, refreshed=0, reused=0, stale=0, failed=0) -> CampaignResult:
+        return CampaignResult(rebuilt=rebuilt, refreshed=refreshed, reused=reused,
+                              stale=stale, failed=failed,
                               seconds={**{k: round(v, 2) for k, v in secs.items()},
                                        "total": round(perf_counter() - t_start, 2)},
                               thumb_jobs=thumb_jobs, coll_thumb_jobs=coll_thumb_jobs)
@@ -259,18 +293,25 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
             log.warning(f"all products below minPoints in {folder.name}, campaign {camp_id} untouched")
             return _result()
 
-    rebuilt = reused = 0
+    rebuilt = refreshed = reused = 0
     rebuilt_ids: set[str] = set()   # feeds the subcollection thumbnail gate below
     failed_items = []
     for p in products:
         prev = existing.get(p.id)
         t = perf_counter()
-        reuse = (not policy.force and not sidecar_changed and prev is not None
-                 and not _needs_rebuild(p, prev))
+        carry = (not policy.force and not sidecar_changed and prev is not None
+                 and _asset_shape_ok(p, prev) and not _needs_rebuild(p, prev))
         secs["hash"] += perf_counter() - t
-        if reuse:
-            p.item = prev.clone()
-            reused += 1
+        if carry:
+            # file and asset shape unchanged: a properties edit is patched into the item,
+            # no reader call, no rehash, and out of rebuilt_ids so no thumbnail re-render
+            if _needs_refresh(p, prev, props, camp):
+                if not policy.dry_run:
+                    p.item = refresh_item(prev, p, camp, props)
+                refreshed += 1
+            else:
+                p.item = prev.clone()
+                reused += 1
             continue
         if not policy.dry_run:
             # created survives rebuilds, updated stamps in build_item
@@ -295,7 +336,7 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
         products = [p for p in products if p not in failed_items]
         if not products:
             log.warning(f"all items failed in {folder.name}, campaign {camp_id} untouched")
-            return _result(reused=reused, failed=len(failed_items))
+            return _result(refreshed=refreshed, reused=reused, failed=len(failed_items))
 
     stale_ids = sorted(set(existing) - {p.id for p in products})
     for sid in stale_ids:
@@ -306,9 +347,9 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
         else:
             log.info(f"removed stale item: {sid}")
 
-    counts = (rebuilt, reused, len(stale_ids), len(failed_items))
-    log.info(f"{camp_id}: {rebuilt} rebuilt, {reused} reused, {len(stale_ids)} stale, "
-             f"{len(failed_items)} failed")
+    counts = (rebuilt, refreshed, reused, len(stale_ids), len(failed_items))
+    log.info(f"{camp_id}: {rebuilt} rebuilt, {refreshed} refreshed, {reused} reused, "
+             f"{len(stale_ids)} stale, {len(failed_items)} failed")
     # resolved before the dry-run exit: --dryRun --loglevel debug is the sidecar edit-check loop
     nodes = resolve_hierarchy(products, sc.get("hierarchy"))
     for node in nodes:

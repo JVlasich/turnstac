@@ -243,6 +243,17 @@ def _item_title(product, campaign: date) -> str:
     return f"{product.assets[0].label.replace('_', ' ')} {campaign.isoformat()}"
 
 
+def merged_properties(properties: dict | None, product) -> dict:
+    """Sidecar properties overlay for one product: campaign-wide base, then byLabel
+    (registry label), then byId; a null value drops the key it landed on."""
+    if not properties:
+        return {}
+    merged = {k: v for k, v in properties.items() if k not in ("byLabel", "byId")}
+    merged.update((properties.get("byLabel") or {}).get(product.assets[0].label) or {})
+    merged.update((properties.get("byId") or {}).get(product.id) or {})
+    return {k: v for k, v in merged.items() if v is not None}
+
+
 def build_item(product, campaign: date, *, created: datetime | None = None,
                properties: dict | None = None, crs: str | None = None) -> pystac.Item:
     """discover::Product -> populated pystac.Item.
@@ -321,14 +332,32 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
     now = datetime.now(timezone.utc)
     item.common_metadata.created = created or now
     item.common_metadata.updated = now
-    if properties:
-        # campaign-wide base, then byLabel (registry label), then byId; null drops a base key
-        merged = {k: v for k, v in properties.items() if k not in ("byLabel", "byId")}
-        merged.update((properties.get("byLabel") or {}).get(product.assets[0].label) or {})
-        merged.update((properties.get("byId") or {}).get(product.id) or {})
-        item.properties.update({k: v for k, v in merged.items() if v is not None})
+    item.properties.update(merged_properties(properties, product))
 
     log.debug(f"built item {item.id} ({len(extracted)} asset(s))")
+    return item
+
+
+def refresh_item(prev, product, campaign: date, properties: dict | None = None) -> pystac.Item:
+    """Carry a cataloged item over with the sidecar properties overlay reapplied.
+
+    The file is unchanged, so nothing is read and nothing is hashed: only the shaped
+    title and the overlay are restated, in build_item's order, and updated is stamped.
+    A key deleted from the sidecar is not undone (no marker of origin on the item), so
+    that case still needs --force.
+
+    args:
+      prev       - the item from the previous run
+      product    - discover::Product the item was built from
+      campaign   - campaign date, for the generated title
+      properties - sidecar properties block
+    returns:
+      a new pystac.Item, the previous one untouched
+    """
+    item = prev.clone()
+    item.properties["title"] = _item_title(product, campaign)  # a sidecar title overrides below
+    item.properties.update(merged_properties(properties, product))
+    item.common_metadata.updated = datetime.now(timezone.utc)
     return item
 
 

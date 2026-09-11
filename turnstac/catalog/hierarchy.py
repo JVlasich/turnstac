@@ -6,12 +6,6 @@ then applies the sidecar hierarchy block:
   placement: {product_id: group_name | ~}   pin into a group / force flat
   groups:    {group_name: {title, description}}   subcollection metadata
 no pystac import.
-
-A placement key may be an fnmatch pattern ('*?[') instead of a literal id; it is matched
-case-insensitively against the same qualified product id a literal key uses. Precedence is
-exact key > pattern > auto tile group, and among patterns the first one in sidecar file
-order wins. 'groups' keys stay literal, they are output names not selectors.
-A pattern key must be quoted in YAML, '*' opens an alias and '*_tile_*: tiles' is a parse error.
 """
 
 import logging
