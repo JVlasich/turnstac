@@ -76,6 +76,16 @@ def load_sidecar(path) -> dict:
     return data
 
 
+def _find_sidecar(folder: Path):
+    """Campaign sidecar path, case-insensitive, .yaml before .yml, else None."""
+    hits = {f.name.lower(): f for f in folder.iterdir()
+            if f.name.lower() in ("campaign.yaml", "campaign.yml") and f.is_file()}
+    if len(hits) > 1:
+        log.warning(f"{folder.name}: campaign.yaml and campaign.yml both present, "
+                    f"using campaign.yaml")
+    return hits.get("campaign.yaml") or hits.get("campaign.yml")
+
+
 def _register_id(seen: dict | None, new_id: str, kind: str, source: str, policy: str) -> None:
     """One id namespace per run (root/collections/subcollections/items).
     Collision: warn keeps the first owner, raise fails the campaign.
@@ -204,8 +214,8 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
     returns:
       CampaignResult (counts, timings, thumbnail jobs)
     raises:
-      missing campaign.yaml; item/subcollection id collision when
-      policy.id_collisions == "raise", collection id collision always
+      item/subcollection id collision when policy.id_collisions == "raise",
+      collection id collision always
     """
     folder = Path(folder)
     t_start = perf_counter()
@@ -220,10 +230,10 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
                                        "total": round(perf_counter() - t_start, 2)},
                               thumb_jobs=thumb_jobs, coll_thumb_jobs=coll_thumb_jobs)
 
-    try:
-        sc = load_sidecar(folder / "campaign.yaml")
-    except FileNotFoundError:
-        sc = load_sidecar(folder / "campaign.yml")
+    path = _find_sidecar(folder)
+    if path is None:
+        log.warning(f"no campaign.yaml in {folder.name}, building with defaults")
+    sc = load_sidecar(path) if path else {}
 
     digest = _sidecar_digest(sc)
     sp, lb = merge_overrides(sc.get("patterns"), sc.get("labels"))

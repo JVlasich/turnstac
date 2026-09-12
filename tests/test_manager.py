@@ -254,7 +254,9 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
         "      title: DTM tiles\n",
         encoding="utf-8",
     )
-    (tmp_path / "2023-05-05_broken").mkdir()          # campaign without campaign.yaml
+    broken = tmp_path / "2023-05-05_broken"
+    broken.mkdir()                                    # campaign with a malformed sidecar
+    (broken / "campaign.yaml").write_text("- not a mapping\n", encoding="utf-8")
     (tmp_path / "notes").mkdir()                      # not a campaign, ignored
 
     # run 1: full build, broken campaign isolated
@@ -360,6 +362,56 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
     assert not res["failed"] and res["stale_collections"] == ["catalog_2023-02-08"], res
     cat = pystac.Catalog.from_file(str(out / "catalog.json"))
     assert cat.get_child("catalog_2023-02-08") is None
+
+
+def test_optional_sidecar(tmp_path, write_tif, monkeypatch):
+    """A campaign without campaign.yaml warns and builds from defaults. The digest of a
+    missing sidecar equals the digest of an empty one, so adding the file changes nothing
+    but the warning. The lookup is case-insensitive."""
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "catalog"
+    camp = tmp_path / "2024-04-04"
+    camp.mkdir()
+    write_tif(camp / "pielach_2024-04-04_dtm_etrs89.tif", 10)
+
+    # no sidecar: clean run, collection from defaults
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert not res["failed"], res
+    assert _counts(res, "2024-04-04") == {"rebuilt": 1, "refreshed": 0, "reused": 0, "stale": 0, "failed": 0}, res
+    assert any("no campaign.yaml" in w for w in res["warnings"]), res["warnings"]
+    cat = pystac.Catalog.from_file(str(out / "catalog.json"))
+    coll = cat.get_child("catalog_2024-04-04")
+    assert coll is not None and coll.title is None and coll.license == "other"
+
+    # second run reuses, a missing sidecar is not a rebuild trigger
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
+
+    # an empty sidecar carries the same digest: warning gone, still reused
+    (camp / "campaign.yaml").write_text("", encoding="utf-8")
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
+    assert not any("no campaign.yaml" in w for w in res["warnings"]), res["warnings"]
+
+    # case-insensitive lookup finds it too
+    (camp / "campaign.yaml").rename(camp / "Campaign.YAML")
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
+    assert not any("no campaign.yaml" in w for w in res["warnings"]), res["warnings"]
+
+    # both spellings present: warned, .yaml wins (the .yml crs would have forced a rebuild)
+    (camp / "campaign.yml").write_text('crs: "EPSG:4326"\n', encoding="utf-8")
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
+    assert any("both present" in w for w in res["warnings"]), res["warnings"]
+
+    # a dangling sidecar symlink is a missing sidecar, not a failed campaign
+    (camp / "campaign.yml").unlink()
+    (camp / "Campaign.YAML").unlink()
+    (camp / "campaign.yaml").symlink_to(camp / "gone.yaml")
+    res = update_catalog(tmp_path, out, RunPolicy())
+    assert not res["failed"], res
+    assert any("no campaign.yaml" in w for w in res["warnings"]), res["warnings"]
 
 
 def test_sidecar_refresh(tmp_path, write_tif, monkeypatch):
