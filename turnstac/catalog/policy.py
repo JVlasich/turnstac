@@ -7,7 +7,7 @@ providers) and the OPALS options stay out: not per-run policy.
 """
 
 from dataclasses import dataclass, fields
-from typing import Literal
+from typing import Literal, get_args, get_origin
 
 # config key (camelCase, as written in YAML / argparse) -> field name.
 # Declaration order also fixes the key order of the generated config template.
@@ -24,15 +24,6 @@ _FIELD_MAP = {
     "assetHrefs":     "asset_hrefs",
     "minPoints":      "min_points",
     "thumbnails":     "thumbnails",
-}
-
-_ALLOWED = {
-    "stale":            ("warn", "remove", "raise"),
-    "unknown_assets":   ("warn", "skip", "raise"),
-    "non_cloud_native": ("warn", "skip", "raise"),
-    "invalid_cog":      ("warn", "demote", "raise"),
-    "id_collisions":    ("warn", "raise"),
-    "asset_hrefs":      ("absolute", "relative"),
 }
 
 
@@ -56,10 +47,14 @@ class RunPolicy:
     thumbnails: bool = True                              # render PNG thumbnails for raster items (ortho/DSM/DTM)
 
     def __post_init__(self):
-        for name, allowed in _ALLOWED.items():
-            value = getattr(self, name)
+        """Every Literal field must hold one of its declared values."""
+        for f in fields(self):
+            if get_origin(f.type) is not Literal:
+                continue
+            allowed = get_args(f.type)
+            value = getattr(self, f.name)
             if value not in allowed:
-                raise ValueError(f"{name}={value!r} not in {allowed}")
+                raise ValueError(f"{f.name}={value!r} not in {allowed}")
 
     @classmethod
     def from_config(cls, cfg: dict) -> "RunPolicy":

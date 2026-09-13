@@ -71,11 +71,9 @@ def _fit(cw: int, ch: int, edge: int) -> tuple[int, int]:
 
 def _write_png(ds, out: Path) -> None:
     """Writes a dataset to PNG, capping the longest edge at MAX_EDGE"""
-    ow, oh = ds.RasterXSize, ds.RasterYSize
-    if max(ow, oh) > MAX_EDGE:
-        s = MAX_EDGE / max(ow, oh)
-        ds = gdal.Translate("", ds, format="MEM", resampleAlg="average",
-                            width=max(1, round(ow * s)), height=max(1, round(oh * s)))
+    w, h = _fit(ds.RasterXSize, ds.RasterYSize, MAX_EDGE)
+    if (w, h) != (ds.RasterXSize, ds.RasterYSize):
+        ds = gdal.Translate("", ds, format="MEM", resampleAlg="average", width=w, height=h)
     gdal.Translate(str(out), ds, format="PNG")
 
 

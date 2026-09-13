@@ -1,7 +1,6 @@
 # Tool config template. Every value shown = built-in default; uncomment to change.
 # Precedence: CLI > this file > defaults.
 # One file holds all namespaces: each tool reads its own section, ignores the rest
-# `turnstac-template cfg.yaml` writes a bare version of this.
 
 
 # =============================================================================

@@ -4,7 +4,7 @@ import fnmatch
 import hashlib
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from itertools import chain
 from pathlib import Path
@@ -63,8 +63,8 @@ class CampaignResult:
 
     def counts(self) -> dict:
         """JSON-safe counts block for last_run.json (jobs dropped)."""
-        return {"rebuilt": self.rebuilt, "refreshed": self.refreshed, "reused": self.reused,
-                "stale": self.stale, "failed": self.failed, "seconds": self.seconds}
+        return {f.name: getattr(self, f.name) for f in fields(self)
+                if f.name not in ("thumb_jobs", "coll_thumb_jobs")}
 
 
 def load_sidecar(path) -> dict:

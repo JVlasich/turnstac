@@ -15,7 +15,7 @@ holding the products plus a per-campaign `campaign.yaml` sidecar
 ```
 data-root/
 ├── 2023-02-08/              # campaign: <date>-named folder
-│   ├── campaign.yaml        # per-campaign metadata + overrides
+│   ├── campaign.yaml        # per-campaign metadata + overrides (optional)
 │   ├── *_dtm_*.tif ...      # products (COG / COPC preferred)
 │   └── <name>_tiles/        # tiled products -> subcollection
 ├── 2024-10-09/
@@ -39,7 +39,8 @@ data-root/
 
 - **`update_catalog.bat`** — double-click to build/refresh the catalog into
   `<data root>\catalog`. Re-running is safe and cheap: an item is rebuilt only
-  when its file changed (size shortcut, then sha256).
+  when its file changed (size shortcut, then sha256), and a `campaign.yaml`
+  `properties` edit is patched into the affected items without re-reading them.
   Passes `"%REPO%\config.yaml"` if it exists
 - **`view_catalog.bat`** — serves data root + bundled STAC Browser and opens
   `http://localhost:8111/browser/`.
@@ -77,8 +78,8 @@ Each run writes a machine-readable report to `<out>/last_run.json`.
 | `python -m turnstac.pre.tac_raster` | convert GeoTIFF to COG, tiling above a size threshold |
 | `python -m turnstac.pre.c_copc` | convert LAZ to COPC without tiling |
 
-All share the `--config` / `--init` pattern; `python -m turnstac.utils.gen_full_template`
-writes one template covering every namespace (see `sample_configs/sample_config.yaml`).
+The two tiling tools share the `--config` / `--init` pattern (see
+`sample_configs/sample_config.yaml`); `c_copc` takes plain CLI flags.
 
 ## Tests
 

@@ -7,9 +7,7 @@ from pathlib import Path
 
 from ..core.log import setup
 
-# importing tac_pcl pulls opals in at module load. Decouple if convert-only
-# must run without the OPALS stack installed. but thats work
-from .tac_pcl import resolve_inputs, _BIN, _COPCINDEX
+from .common import resolve_inputs, _BIN, _COPCINDEX
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ def main():
     args = ap.parse_args()
     setup(args.loglevel)
 
-    inputs = resolve_inputs(args.infile)
+    inputs = resolve_inputs(args.infile, (".laz",), ".copc.laz")
     results = []
     for f in inputs:
         odir = Path(args.outdir).resolve() if args.outdir else f.parent

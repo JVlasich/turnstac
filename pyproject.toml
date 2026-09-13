@@ -28,7 +28,6 @@ turnstac = "turnstac.core.cli:main"
 turnstac-pre-raster = "turnstac.pre.tac_raster:main"
 turnstac-pre-pcl = "turnstac.pre.tac_pcl:main"
 turnstac-pre-copc = "turnstac.pre.c_copc:main"
-turnstac-template = "turnstac.utils.gen_full_template:main"
 
 [tool.setuptools.packages.find]
 include = ["turnstac*"]

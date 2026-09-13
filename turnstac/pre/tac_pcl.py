@@ -13,6 +13,7 @@ import argparse
 import logging
 import math
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -20,16 +21,13 @@ import textwrap
 from pathlib import Path
 
 from ..core.log import setup, opals_log
-from ..utils import io
+from .common import resolve_inputs, beep, _BIN, _COPCINDEX
 
 #import opals
 from opals import Import, pyDM
 from opals.workflows import preTiling, preCutting # concidering _import
 
 log = logging.getLogger(__name__)
-
-_BIN = Path(__file__).resolve().parents[1] / "bin"   # src/pre/<mod> -> src/bin
-_COPCINDEX = "lascopcindex64" + (".exe" if os.name == "nt" else "") # linux inclusive :) not tested tho
 
 DEFAULTS = {
     "infile": None,
@@ -243,27 +241,16 @@ def convert_to_copc(laz_files: list, tile_tmp: Path, odir: Path):
     lof_path.unlink(missing_ok=True)
 
 
-def resolve_inputs(raw) -> list:
-    """Expand a path or list of paths/dirs into a deduped list of .laz files."""
-    entries = [raw] if isinstance(raw, str) else list(raw)
-    resolved = []
-    seen = set()
-    for entry in entries:
-        p = Path(entry).resolve()
-        if p.is_dir():
-            laz = [f for f in sorted(p.glob("*.laz")) if not f.name.endswith(".copc.laz")]
-        elif p.exists():
-            laz = [p]
+def clean_dir(directory: str, keep: list):
+    """Delete everything in [directory] except items whose names are in [keep]."""
+    keep = set(keep)
+    for item in Path(directory).iterdir():
+        if item.name in keep:
+            continue
+        if item.is_dir() and not item.is_symlink():
+            shutil.rmtree(item)
         else:
-            raise FileNotFoundError(f"Input path not found: {p}")
-        for f in laz:
-            if f not in seen:
-                seen.add(f)
-                resolved.append(f)
-
-    if not resolved:
-        raise Exception(f"No .laz inputs resolved from --infile {entries}")
-    return resolved
+            item.unlink()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -391,7 +378,7 @@ def main():
     if cfg["infile"] is None:
         raise Exception("--infile is required (via CLI or config file)")
 
-    inputs = resolve_inputs(cfg["infile"])
+    inputs = resolve_inputs(cfg["infile"], (".laz",), ".copc.laz")
     tmp_path = Path(cfg["tmp_path"]).resolve()
     tmp_path.mkdir(parents=True, exist_ok=True)
 
@@ -425,14 +412,12 @@ def main():
     elif cfg.get("keepodm"):
         log.info("Cleaning temporary files but keeping ODM.")
         for odm in produced_odms:
-            io.clean_dir(str(odm.parent), [odm.name])
+            clean_dir(str(odm.parent), [odm.name])
     else:
         log.info("Cleaning all temporary files.")
-        io.clean_dir(str(tmp_path), [])
+        clean_dir(str(tmp_path), [])
 
-    if os.name == "nt":  # Windows beep on completion
-        import winsound
-        winsound.MessageBeep()
+    beep()
 
     # Summary
     failed = [(n, m) for n, m in results if m != "ok"]

@@ -12,7 +12,6 @@ Requires: gdal
 
 import argparse
 import logging
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -21,6 +20,7 @@ from osgeo import gdal
 
 from ..core import config
 from ..core.log import setup
+from .common import resolve_inputs, beep
 
 gdal.UseExceptions()
 
@@ -108,34 +108,6 @@ def tile_to_cog(infile: Path, tiles_dir: Path, cfg: dict) -> tuple:
 
     ds = None
     return written, skipped
-
-
-def resolve_inputs(raw) -> list:
-    """Expand a path or list of paths/dirs into a deduped list of .tif files."""
-    entries = [raw] if isinstance(raw, str) else list(raw)
-    resolved = []
-    seen = set()
-    for entry in entries:
-        p = Path(entry).resolve()
-        if p.is_dir():
-            tifs = sorted(
-                f for f in p.iterdir()
-                if f.is_file()
-                and f.suffix.lower() in (".tif", ".tiff")
-                and not f.name.lower().endswith("_cog.tif")
-            )
-        elif p.exists():
-            tifs = [p]
-        else:
-            raise FileNotFoundError(f"Input path not found: {p}")
-        for f in tifs:
-            if f not in seen:
-                seen.add(f)
-                resolved.append(f)
-
-    if not resolved:
-        raise Exception(f"No .tif inputs resolved from --infile {entries}")
-    return resolved
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -246,7 +218,7 @@ def main():
     if cfg["infile"] is None:
         raise Exception("--infile is required (via CLI or config file)")
 
-    inputs = resolve_inputs(cfg["infile"])
+    inputs = resolve_inputs(cfg["infile"], (".tif", ".tiff"), "_cog.tif")
 
     results = []          # (name, "ok" | error message)
     for idx, infile in enumerate(inputs, 1):
@@ -258,9 +230,7 @@ def main():
             log.exception(f"FAILED: {infile.name}", stack_info=True)
             results.append((infile.name, str(e)))
 
-    if os.name == "nt":  # Windows beep on completion
-        import winsound
-        winsound.MessageBeep()
+    beep()
 
     # Summary
     failed = [(n, m) for n, m in results if m != "ok"]

@@ -69,59 +69,10 @@ class AssetMeta:
     geometry_wgs84: dict     | None = None  # GeoJSON Polygon
     bbox_wgs84:     list     | None = None
 
-    def __str__(self) -> str:
-        def num(v):
-            return "?" if v is None else (f"{v:,}" if isinstance(v, int) else f"{v:,.2f}")
-
-        rows = []
-        if self.pc_count is not None:
-            parts = [f"{num(self.pc_count)} pts"]
-            if self.pc_density is not None:
-                parts.append(f"{self.pc_density:.2f} pts/m²")
-            if self.pc_type:
-                parts.append(self.pc_type)
-            rows.append(("pointcloud", " · ".join(parts)))
-        if self.pc_schemas:
-            names = [d.get("name", "?") for d in self.pc_schemas]
-            shown = ", ".join(names[:3]) + (f", +{len(names) - 3} more" if len(names) > 3 else "")
-            rows.append(("schema", f"{len(names)} dims: {shown}"))
-        if self.pc_statistics:
-            rows.append(("statistics", f"{len(self.pc_statistics)} dims"))
-        if self.pc_gps_time_min is not None:
-            rows.append(("gps_time", f"{num(self.pc_gps_time_min)} → {num(self.pc_gps_time_max)}"))
-        if self.proj_epsg or self.proj_wkt:
-            crs = f"EPSG:{self.proj_epsg}" if self.proj_epsg else f"wkt: {self.proj_wkt[:50]}…"
-            parts = [crs]
-            if self.proj_shape:
-                parts.append(f"shape {self.proj_shape[1]}×{self.proj_shape[0]}")
-            if self.proj_bbox:
-                parts.append("bbox [" + ", ".join(f"{v:.2f}" for v in self.proj_bbox) + "]")
-            rows.append(("proj", " · ".join(parts)))
-        if self.raster_bands:
-            parts = [f"{len(self.raster_bands)} band(s)"]
-            if self.raster_spatial_resolution is not None:
-                parts.append(f"{self.raster_spatial_resolution:g} m/px")
-            if self.raster_sampling:
-                parts.append(f"sampling={self.raster_sampling}")
-            rows.append(("raster", " · ".join(parts)))
-        if self.dt_processing:
-            rows.append(("processed", self.dt_processing.isoformat(sep=" ")))
-        if self.bbox_wgs84:
-            rows.append(("wgs84", "[" + ", ".join(f"{v:.5f}" for v in self.bbox_wgs84) + "]"))
-        if not rows:
-            return "AssetMeta(empty)"
-        width = max(len(k) for k, _ in rows)
-        lines = ["AssetMeta"]
-        for i, (k, v) in enumerate(rows):
-            branch = "└─" if i == len(rows) - 1 else "├─"
-            lines.append(f"{branch} {k.ljust(width)}  {v}")
-        return "\n".join(lines)
-
 
 @dataclass
 class FileMeta:
     size: int
-    mtime: float
     sha256: str
 
 
@@ -566,22 +517,15 @@ def file_meta(p: Path | str) -> FileMeta:
         raise ValueError("Path doesnt exist or is not a file")
 
     # stats
-    stat = p.stat()
-    mtime, size = stat.st_mtime, stat.st_size
+    size = p.stat().st_size
 
     # hash, mmap faster but fails on 0 size files, why would they exist tho?
     hash_object = hashlib.sha256()
-    try:
-        with open(p, "rb") as f:
-            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                hash_object.update(mm)
-        hash = hash_object.hexdigest()
-    except ValueError as e:
-        log.exception(f"Error while computing hash for file: {p}, assets cannot be empty",
-                      stack_info=True)
-        raise e
+    with open(p, "rb") as f:
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            hash_object.update(mm)
 
-    return FileMeta(size=size, mtime=mtime, sha256=hash)
+    return FileMeta(size=size, sha256=hash_object.hexdigest())
 
 
 def pcl_point_count(p: Path | str) -> int:
@@ -656,5 +600,4 @@ if __name__ == "__main__":
             assert len(hist["buckets"]) == hist["count"], hist
             log.info(f"    histogram {hist['count']} buckets from {hist['min']:.3f} to "
                      f"{hist['max']:.3f}, {sum(hist['buckets'])} pixels binned")
-        log.debug(f"\n{meta}")
     log.info("raster self-check ok")

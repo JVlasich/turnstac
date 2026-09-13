@@ -47,12 +47,6 @@ class Asset:
     sidecars: list = field(default_factory=list)  # Paths matched by full basename
     file_meta: object = None  # extract.FileMeta, attached by manager's gate when it hashed
 
-    def __str__(self) -> str:
-        cn = "cloud-native" if self.cloud_native else "NOT cloud-native"
-        sc = f" · {len(self.sidecars)} sidecar(s)" if self.sidecars else ""
-        return (f"Asset {self.path.name!r}  [{self.label}, {self.category}/{self.kind}]"
-                f" · {cn} · {self.media_type}{sc}")
-
 
 @dataclass
 class Product:
@@ -62,16 +56,6 @@ class Product:
     assets: list[Asset]       # always length 1 today; a list for the Item builder
     group: str | None = None  # tile-group name -> subcollection; None -> flat in the campaign
     item: object = None       # pystac.Item, attached by manager (build/reuse); untyped so discover stays pystac-free
-
-    def __str__(self) -> str:
-        head = f"Product {self.id!r}  [{self.category}/{self.kind}]"
-        if self.group:
-            head += f"  group={self.group}"
-        lines = [head]
-        for i, a in enumerate(self.assets):
-            branch = "└─" if i == len(self.assets) - 1 else "├─"
-            lines.append(f"{branch} {a}")
-        return "\n".join(lines)
 
 
 # --- matching ---
