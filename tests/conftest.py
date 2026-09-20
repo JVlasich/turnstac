@@ -1,7 +1,10 @@
 import pytest
-from osgeo import gdal, osr
 
-gdal.UseExceptions()
+try:  # bare interpreter: collection survives, the geo tests skip themselves
+    from osgeo import gdal, osr
+    gdal.UseExceptions()
+except ImportError:
+    gdal = osr = None
 
 
 def _write_tif(path, value: int, size: int = 4, px: float = 25) -> None:

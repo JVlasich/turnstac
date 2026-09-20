@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
+
 from turnstac.catalog.build import (_EO_V2, _GPS_EPOCH, _RASTER_V2, build_collection,
                                 build_item, campaign_date, resolve_pc_datetime)
 from turnstac.catalog.discover import discover
@@ -266,6 +268,7 @@ def test_collection_summary_range_spans_both_gsds(tmp_path, write_tif):
 def test_build_item_pointcloud(tmp_path, write_las):
     """Full pcl path through opals: pc:* fields, projection off the sidecar CRS, and the
     GPS-derived acquisition window on the item."""
+    pytest.importorskip("opals")  # the pcl reader calls opalsInfo
     # weekseconds: 3 days into the GPS week that starts Sun 2023-02-05 -> the campaign day
     write_las(tmp_path / "pielach_2023-02-08_ground.las", gps=(3 * 86400, 3 * 86400 + 3600))
     product = discover(tmp_path)[0]
@@ -290,6 +293,7 @@ def test_build_item_pointcloud(tmp_path, write_las):
 
 
 def test_build_item_pointcloud_copc_encoding(tmp_path, write_las):
+    pytest.importorskip("opals")  # the pcl reader calls opalsInfo
     # laspy has no COPC writer, so index a real .laz tile with the shipped tool
     binary = Path(__file__).resolve().parents[1] / "turnstac" / "bin" / "lascopcindex64"
     if not binary.exists():

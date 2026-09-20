@@ -13,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from opals import Info
 from osgeo import gdal, ogr, osr
 
 from ..core.capabilities import laspy_available
@@ -408,6 +407,8 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
     returns:
       AssetMeta object
     """
+    from opals import Info  # module import here keeps extract usable without opals
+
     log.debug(f"extracting pointcloud metadata: {path}")
     inf = Info.Info()
     inf.inFile = str(path)

@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turnstac"
-version = "1.0.0"
+dynamic = ["version"]          # single source: turnstac/__init__.py
 description = "Idempotent static STAC 1.1 catalog pipeline for the Pielach topo-bathymetric LiDAR time series"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"   # libs/lazrs ships cp310 binaries only
 license = "MIT"
 authors = [{ name = "JVlasich", email = "jules.vlasich@geo.tuwien.ac.at" }]
 # GDAL and OPALS come from the environment (OSGeo / opals install), not pip
@@ -17,17 +17,17 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/JVlasich/pielach_stac"
+Homepage = "https://github.com/JVlasich/turnstac"
 
 [project.optional-dependencies]
 validation = ["pystac[validation]"]
 dev = ["pytest"]
 
-[project.scripts]
-turnstac = "turnstac.core.cli:main"
-turnstac-pre-raster = "turnstac.pre.tac_raster:main"
-turnstac-pre-pcl = "turnstac.pre.tac_pcl:main"
-turnstac-pre-copc = "turnstac.pre.c_copc:main"
+# No [project.scripts]: a pip install runs the catalog path fine, but the wheel carries
+# neither libs/ nor turnstac/bin/ -> no laspy/lazrs and lascocindex64
+
+[tool.setuptools.dynamic]
+version = { attr = "turnstac.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["turnstac*"]

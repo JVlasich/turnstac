@@ -1,4 +1,4 @@
-# Pielach STAC (turnstac)
+# Turnstac (Pielach STAC)
 
 Automated, idempotent pipeline that turns the processed topo-bathymetric LiDAR
 time series of the Pielach river into a standards-compliant static
@@ -25,12 +25,14 @@ data-root/
 
 ## Prerequisites
 
+- **Not a pip package.** Clone or unzip the repo and run it in place. Installation via `pyproject.toml`
+  works but loses  `libs\` and `turnstac\bin\`
 - Windows with an [OPALS](https://opals.geo.tuwien.ac.at/) installation
   (default path `C:\opals_nightly_2.6.0`, override with the `OPALS_ROOT`
-  environment variable). GDAL, numpy, scipy and matplotlib ride in OPALS'
+  environment variable). GDAL, numpy, scipy and matplotlib included in OPALS'
   bundled Python.
-- Pure-Python dependencies (pystac, pyyaml, laspy, lazrs) are vendored in
-  `libs\`, no pip install needed.
+- Dependencies (pystac, pyyaml, laspy, lazrs) are vendored in `libs\`, no pip
+  install needed. `lazrs` ships as a compiled extension for Linux and Windows.
 - Running outside `opalsShell`: set `PROJ_LIB=<opals>\addons\crs` and
   `GDAL_DATA=<opals>\addons\gdal`, otherwise CRS information drops silently.
   The `.bat` launchers handle this.
@@ -38,17 +40,20 @@ data-root/
 ## Quick start
 
 - **`update_catalog.bat`** — double-click to build/refresh the catalog into
-  `<data root>\catalog`. Re-running is safe and cheap: an item is rebuilt only
-  when its file changed (size shortcut, then sha256), and a `campaign.yaml`
-  `properties` edit is patched into the affected items without re-reading them.
+  `<data root>\catalog`. Re-running is safe: an item is rebuilt only when its file
+  changed, and a `campaign.yaml` `properties` edit is patched into the affected items
+  without re-reading them. It is not free. The gate is content-true, so a file whose
+  size is unchanged is still hashed (sha256), and `discover` opens
+  every raster once with GDAL before the gate is asked.
   Passes `"%REPO%\config.yaml"` if it exists
 - **`view_catalog.bat`** — serves data root + bundled STAC Browser and opens
   `http://localhost:8111/browser/`.
 
 ## CLI
 
+run inside repo-root:
 ```
-python -m turnstac <root> [--config config.yaml] [options]
+python -m turnstac <data-root> [--config config.yaml] [options]
 python -m turnstac --init <path>
 ```
 
@@ -75,7 +80,7 @@ Each run writes a machine-readable report to `<out>/last_run.json`.
 | Tool | Purpose |
 | --- | --- |
 | `python -m turnstac.pre.tac_pcl` | tile a LAZ with OPALS and convert tiles to COPC |
-| `python -m turnstac.pre.tac_raster` | convert GeoTIFF to COG, tiling above a size threshold |
+| `python -m turnstac.pre.tac_raster` | convert GeoTIFF to COG, optional tiling above a size threshold |
 | `python -m turnstac.pre.c_copc` | convert LAZ to COPC without tiling |
 
 The two tiling tools share the `--config` / `--init` pattern (see
@@ -84,9 +89,9 @@ The two tiling tools share the `--config` / `--init` pattern (see
 ## Tests
 
 ```
-env\Scripts\python -m pytest tests
+python -m pytest tests
 ```
-requires `pytest`
+requires `pytest`, run in the same interpreter as the pipeline (`opalsShell`).
 
 ## License
 
@@ -94,7 +99,7 @@ MIT License, see `LICENSE`.
 
 The vendored [stac-browser](https://github.com/radiantearth/stac-browser) build in
 `browser/` is third-party code under its own ISC license, see `browser/LICENSE`.
-The pure-Python dependencies vendored in `libs/` each keep their upstream license
+The dependencies vendored in `libs/` each keep their upstream license
 in their `.dist-info` folder.
 
 The `lascopcindex64` binaries in `turnstac/bin/` are

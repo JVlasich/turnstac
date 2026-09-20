@@ -5,8 +5,23 @@ from pathlib import Path
 import pystac
 import pytest
 
+import turnstac
+
+pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
+
 from turnstac.catalog.manager import update_catalog
 from turnstac.catalog.policy import RunPolicy
+
+
+def test_git_commit_is_none_without_git(monkeypatch):
+    """A zip download has no .git and maybe no git: the report says None, it does not fail."""
+    from turnstac.catalog import manager
+
+    def boom(*a, **kw):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(manager.subprocess, "run", boom)
+    assert manager._git_commit() is None
 
 
 def _counts(res: dict, camp: str) -> dict:
@@ -283,6 +298,7 @@ def test_update_catalog_staged_idempotency(tmp_path, write_tif, monkeypatch):
     # run report persisted
     report = json.loads((out / "last_run.json").read_text(encoding="utf-8"))
     assert report["ok"]["2023-02-08_test"]["rebuilt"] == 5 and report["failed"]
+    assert report["version"] == turnstac.__version__ and "commit" in report
 
     # run 2: no-op, everything reused, timestamps untouched
     res = update_catalog(tmp_path, out, RunPolicy())

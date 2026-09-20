@@ -2,6 +2,9 @@ import json
 import struct
 
 import pytest
+
+pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
+
 from osgeo import gdal, osr
 
 from turnstac.catalog.extract import raster
@@ -41,6 +44,7 @@ def test_srs_from_wkt_and_sidecar_keep_easting_first(tmp_path, write_tif, write_
     (easting-first) order only to a dataset's own SRS, so the WKT and sidecar paths have
     to set it themselves - otherwise the transform reads the easting as a northing and
     the item lands ~500 km southeast of the campaign."""
+    pytest.importorskip("opals")  # the pcl reader calls opalsInfo
     import laspy
     import numpy as np
     from laspy.vlrs.known import WktCoordinateSystemVlr

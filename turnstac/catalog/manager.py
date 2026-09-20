@@ -4,6 +4,7 @@ import fnmatch
 import hashlib
 import json
 import logging
+import subprocess
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from itertools import chain
@@ -13,6 +14,7 @@ from time import perf_counter
 import pystac
 import yaml
 
+from .. import __version__
 from ..core import config
 from ..core.capabilities import laspy_available
 from ..core.registry import merge_overrides
@@ -640,10 +642,25 @@ def update_catalog(root, out_dir, policy: RunPolicy) -> dict:
     return res
 
 
+def _git_commit() -> str | None:
+    """Short HEAD sha of the checkout this runs from, None without git or .git."""
+    root = Path(__file__).resolve().parents[2]
+    if not (root / ".git").exists():   # git -C walks up, an enclosing repo is not ours
+        return None
+    try:
+        p = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
 def _write_report(res: dict, out_dir: Path, **knobs) -> None:
     """Machine-readable run report next to the catalog, overwritten each run (dry runs
-    included). Not a STAC object, but it belongs to the catalog it describes"""
-    report = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), **knobs, **res}
+    included). Not a STAC object, but it belongs to the catalog it describes.
+    version + commit name the code that wrote it, the only provenance a bundle can give."""
+    report = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "version": __version__, "commit": _git_commit(), **knobs, **res}
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "last_run.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")

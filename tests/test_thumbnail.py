@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
+
 from osgeo import gdal
 
 from turnstac.catalog.thumbnail import render_collection_thumbnail, render_thumbnail, MAX_EDGE

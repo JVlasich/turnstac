@@ -2,6 +2,9 @@ import io
 import logging
 
 import pytest
+
+pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
+
 from osgeo import gdal
 
 from turnstac.catalog.discover import COG_MEDIA_TYPE, _ISO_DATE, discover

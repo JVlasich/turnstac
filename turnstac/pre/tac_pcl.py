@@ -381,6 +381,10 @@ def main():
     inputs = resolve_inputs(cfg["infile"], (".laz",), ".copc.laz")
     tmp_path = Path(cfg["tmp_path"]).resolve()
     tmp_path.mkdir(parents=True, exist_ok=True)
+    # fixed scratch dir below tmp_path: clean_dir only ever empties this, never tmp_path
+    # itself, and a kept ODM is still where the next run looks for it
+    scratch = tmp_path / "tac_pcl"
+    scratch.mkdir(exist_ok=True)
 
     explicit_outdir = Path(cfg["outdir"]).resolve() if cfg["outdir"] else None
 
@@ -399,7 +403,7 @@ def main():
     for idx, infile in enumerate(inputs, 1):
         log.info(f"\033[96m=== {infile.name} ({idx}/{len(inputs)}) ===\033[00m")
         try:
-            odm_path = process_one(infile, cfg, outdir_for(infile), tmp_path)
+            odm_path = process_one(infile, cfg, outdir_for(infile), scratch)
             produced_odms.append(odm_path)
             results.append((infile.name, "ok"))
         except Exception as e:
@@ -415,7 +419,7 @@ def main():
             clean_dir(str(odm.parent), [odm.name])
     else:
         log.info("Cleaning all temporary files.")
-        clean_dir(str(tmp_path), [])
+        clean_dir(str(scratch), [])
 
     beep()
 
