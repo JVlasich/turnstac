@@ -1,37 +1,17 @@
 cff-version: 1.2.0
-message: " "
+message: "If you use this software, please cite it as below."
 title: "turnstac"
 abstract: >-
-  Idempotent pipeline generating a static STAC 1.1 catalog from the processed
-  topo-bathymetric LiDAR time series of the Pielach river.
+  Incremental and configurable STAC-Catalog creator for bachelors thesis at TU Wien.
 type: software
 authors:
   - family-names: Vlasich
     given-names: Jules
-    email: jules.vlasich@geo.tuwien.ac.at
-    affiliation: "TU Wien, Department of Geodesy and Geoinformation"
 version: 1.0.0
 date-released: 2026-09-22
 license: MIT
 repository-code: "https://github.com/JVlasich/turnstac"
-keywords:
-  - STAC
-  - LiDAR
-  - topo-bathymetric
-  - metadata
-  - cloud-native geospatial
-
-preferred-citation:
-  type: thesis
-  title: >-
-    Zeitserie Pielach: Konzeption und Implementierung einer STAC-Architektur
-    für multi-temporale räumliche Datensätze
-  authors:
-    - family-names: Vlasich
-      given-names: Jules
-      email: jules.vlasich@geo.tuwien.ac.at
-  thesis-type: "Bachelor's thesis"
-  institution:
-    name: "TU Wien"
-  year: 2026
-  language: deu
+identifiers:
+  - type: url
+    value: "https://github.com/JVlasich/turnstac/releases/tag/v1.0.0"
+    description: "Release 1.0.0"
