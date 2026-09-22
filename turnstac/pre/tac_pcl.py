@@ -41,7 +41,7 @@ DEFAULTS = {
     "keepodm": True,
     "buffer": 0,
     "keeptmp": False,
-    "mergeBelow": 100.0,
+    "mergeBelow": 0,
 }
 
 

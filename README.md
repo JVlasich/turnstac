@@ -25,8 +25,7 @@ data-root/
 
 ## Prerequisites
 
-- **Not a pip package.** Clone or unzip the repo and run it in place. Installation via `pyproject.toml`
-  works but loses  `libs\` and `turnstac\bin\`
+- **Not a pip package.** Clone or unzip the repo and run it in place, inside `opalsShell`
 - Windows with an [OPALS](https://opals.geo.tuwien.ac.at/) installation
   (default path `C:\opals_nightly_2.6.0`, override with the `OPALS_ROOT`
   environment variable). GDAL, numpy, scipy and matplotlib included in OPALS'
@@ -44,7 +43,7 @@ data-root/
   changed, and a `campaign.yaml` `properties` edit is patched into the affected items
   without re-reading them. It is not free. The gate is content-true, so a file whose
   size is unchanged is still hashed (sha256), and `discover` opens
-  every raster once with GDAL before the gate is asked.
+  every raster once with GDAL.
   Passes `"%REPO%\config.yaml"` if it exists
 - **`view_catalog.bat`** — serves data root + bundled STAC Browser and opens
   `http://localhost:8111/browser/`.
