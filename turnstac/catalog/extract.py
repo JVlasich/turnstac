@@ -15,7 +15,6 @@ from typing import Any, Callable
 
 from osgeo import gdal, ogr, osr
 
-from ..core.capabilities import laspy_available
 from ..core.log import opals_log
 
 osr.UseExceptions()
@@ -32,7 +31,7 @@ _MIN_PART_M2    = 4000.0  # footprint parts below this are mask noise
 _MIN_HOLE_M2    = 1000.0  # interior gaps below this are not represented
 _SIMPLIFY_M     = 6.0     # vertex tolerance; above a gap's radius the ring collapses
 _MIN_AREA_RATIO = 0.5     # footprint below this share of the valid area -> bbox rectangle
-_MIN_CELL_M     = 6.0     # floor for the point-cloud grid cell: below _SIMPLIFY_M the detail
+_MIN_CELL_M     = 6.0     # point-cloud grid cell floor; finer detail is simplified away anyway
 
 # what gdalinfo -hist reports
 _HIST_BUCKETS = 256
@@ -482,8 +481,6 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
     fp = None
     if not str(path).lower().endswith(".copc.laz"):
         log.info(f"not COPC, geometry stays the bbox rectangle: {path}")
-    elif not laspy_available():
-        log.warning(f"laspy/lazrs unavailable, geometry stays the bbox rectangle: {path}")
     else:
         try:
             fp = _pcl_footprint(path, proj_bbox, srs)
@@ -498,7 +495,7 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
         pc_density=None if math.isnan(density) else density,  # nan when exactComputation off
         pc_type="lidar",  # sidecar properties override it, e.g. "pc:type": dim
         pc_schemas=schemas,
-        pc_statistics=statistics, # gpstime duplicate here
+        pc_statistics=statistics,
         pc_gps_time_min=gps["minimum"] if gps else None,
         pc_gps_time_max=gps["maximum"] if gps else None,
         proj_epsg=int(code) if code else None,
@@ -512,15 +509,13 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
 def file_meta(p: Path | str) -> FileMeta:
     """File metadata for comparing against cataloged assets. The idempotency gate uses
     it to call the other readers only on change."""
-    # checks
     p = Path(p)
     if not (p.exists() and p.is_file()):
         raise ValueError("Path doesnt exist or is not a file")
 
-    # stats
     size = p.stat().st_size
 
-    # hash, mmap faster but fails on 0 size files, why would they exist tho?
+    # mmap is faster but fails on empty files
     hash_object = hashlib.sha256()
     with open(p, "rb") as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -539,66 +534,8 @@ def pcl_point_count(p: Path | str) -> int:
         return r.header.point_count
 
 
-# kind → fn(path, needed_exts) -> AssetMeta (I/O once, gated)
+# kind -> reader(path, crs) -> AssetMeta
 readers: dict[str, Callable] = {
     "raster": raster,
     "pcl": pointcloud,
 }
-
-
-# Baseline (always, not extension-gated): WGS84 `geometry` (polygon) + `bbox`
-# plus the fields needed for id/datetime.
-
-
-# --- self-check ---
-# python -m <this script> <target file> to test extract metadata
-
-if __name__ == "__main__":
-    import sys
-
-    from ..core.log import setup
-
-    setup()
-
-    args = sys.argv[1:]
-    target = Path(args[0]) if args else next(Path("data/sample_tif").rglob("*.tif"))
-
-    if target.name.lower().endswith((".laz", ".las")):
-        meta = pointcloud(target)
-        assert meta.pc_count, "no points"
-        # schemas = every dim (unfiltered), stats subset, longnames verbatim and unique
-        schema_names = {s["name"] for s in meta.pc_schemas}
-        assert {s["name"] for s in meta.pc_statistics} <= schema_names
-        assert len(schema_names) == len(meta.pc_schemas), schema_names
-        lonmin, latmin, lonmax, latmax = meta.bbox_wgs84
-        assert -180 <= lonmin <= lonmax <= 180 and -90 <= latmin <= latmax <= 90, meta.bbox_wgs84
-        log.info(f"{target.name}: count={meta.pc_count} density={meta.pc_density:.2f} epsg={meta.proj_epsg}")
-        log.info(f"  bbox_wgs84={[round(v, 6) for v in meta.bbox_wgs84]}")
-        log.info(f"  gps_time min={meta.pc_gps_time_min} max={meta.pc_gps_time_max}")
-        log.debug(f"  {meta.pc_statistics=}")
-        log.info("pointcloud self-check ok")
-        sys.exit(0)
-
-    meta = raster(target)
-
-    assert meta.raster_bands, "no bands extracted"
-    assert meta.proj_epsg or meta.proj_wkt, "no CRS info"
-    lonmin, latmin, lonmax, latmax = meta.bbox_wgs84
-    assert -180 <= lonmin <= lonmax <= 180 and -90 <= latmin <= latmax <= 90, meta.bbox_wgs84
-
-    log.info(f"{target.name}: epsg={meta.proj_epsg} shape={meta.proj_shape} dt={meta.dt_processing}")
-    log.info(f"  sampling={meta.raster_sampling} resolution={meta.raster_spatial_resolution}")
-    log.info(f"  bbox_wgs84={[round(v, 6) for v in meta.bbox_wgs84]}")
-    for b in meta.raster_bands:
-        s = b["statistics"]
-        assert 0 <= s["valid_percent"] <= 100, s
-        log.info(f"  band {b['index']} {b['data_type']} {b['color_interp']} nodata={b['nodata']} "
-                 f"unit={b['unit']} scale={b['scale']} offset={b['offset']} nbits={b['bits_per_sample']} "
-                 f"min={s['minimum']:.3f} max={s['maximum']:.3f} mean={s['mean']:.3f} std={s['stddev']:.3f} "
-                 f"valid={s['valid_percent']:.1f}% count={s['count']}")
-        if b["histogram"]:
-            hist = b["histogram"]
-            assert len(hist["buckets"]) == hist["count"], hist
-            log.info(f"    histogram {hist['count']} buckets from {hist['min']:.3f} to "
-                     f"{hist['max']:.3f}, {sum(hist['buckets'])} pixels binned")
-    log.info("raster self-check ok")

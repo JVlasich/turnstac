@@ -125,7 +125,7 @@ def render_thumbnail(item, src_path, kind: str) -> str:
         log.warning(f"no CRS/bbox for thumbnail, map overlay may misalign: {item.id}")
 
     _write_png(rendered, out)
-    return out.resolve().as_posix()
+    return out.as_posix()
 
 
 COARSE_N = int(4e5)  # decimation target for plain (non-COPC) laz/las
@@ -189,7 +189,7 @@ def _bin_and_save(x, y, z, out: Path, extent=None) -> str:
     vmin, vmax = np.nanpercentile(grid, [10, 90])  # guard implausible high/low returns
     # grid is [x, y]; transpose to rows=y, origin lower keeps north up
     mpimg.imsave(str(out), grid.T, cmap="cividis", vmin=vmin, vmax=vmax, origin="lower")
-    return out.resolve().as_posix()
+    return out.as_posix()
 
 
 def _render_pcl(src: str, out: Path) -> str:

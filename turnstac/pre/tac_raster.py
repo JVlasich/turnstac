@@ -4,8 +4,8 @@ GeoTIFF -> COG. Inputs above minTileSize (GB) become COG tiles instead of one CO
 Each input produces its own output.
 
 Usage:
-    python tac_raster.py --infile file.tif [--config config.yaml] [--outdir dir]
-    python tac_raster.py --init [config.yaml]
+    python -m turnstac.pre.tac_raster --infile file.tif [--config config.yaml] [--outdir dir]
+    python -m turnstac.pre.tac_raster --init [config.yaml]
 
 Requires: gdal
 """
@@ -199,12 +199,10 @@ def main():
     cli_args = parser.parse_args()
     setup(cli_args.loglevel)
 
-    # --init: generate template and exit
     if cli_args.init is not None:
         config.generate_template_config(namespace, Path(cli_args.init))
         sys.exit(0)
 
-    # Load config file
     if cli_args.config is not None:
         config_path = Path(cli_args.config)
         if not config_path.is_file():

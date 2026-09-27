@@ -93,10 +93,10 @@ STEM_PATTERNS: dict[str, dict[str, object]] = {
 LABELS: dict[str, dict[str, Any]] = {
     "pointcloud_copc": {
         "category":   "pointcloud",          # drives item-grouping + collection placement
-        "kind":       "pcl",           # dispatches @reader  (pcl | raster)
+        "kind":       "pcl",           # reader dispatch (pcl | raster)
         "stac_roles": ["data"],               # STAC asset.roles array
         "media_type": "application/vnd.laszip+copc",
-        "extensions": ["pointcloud", "projection", "file"],  # drives reader gating + populators
+        "extensions": ["pointcloud", "projection", "file"],  # populators to run
         "thumbnail":  "pointcloud",           # renderer: rgb | hillshade | pointcloud; None = no thumbnail
     },
     "pointcloud": {
@@ -235,7 +235,7 @@ def _validate(stem_patterns, labels) -> None:
         if not isinstance(value, dict) or not value:
             raise ValueError(f"pattern {key!r}: set at least one key")
         unknown = [k for k in value if k not in _PATTERN_KEYS]
-        if unknown:  # a typo would otherwise read as an omitted key and match everything
+        if unknown:
             raise ValueError(f"pattern {key!r}: unknown keys {unknown}, known: {list(_PATTERN_KEYS)}")
         for k in _PATTERN_KEYS:
             if isinstance(value.get(k), str):  # a bare scalar would iterate character-wise
@@ -244,14 +244,10 @@ def _validate(stem_patterns, labels) -> None:
             value[k] = [str(t).lower() for t in value.get(k, [])]  # omitted -> []; matching is lowercased
     for key, value in labels.items():
         unknown = [k for k in value if k not in _LABEL_KEYS]
-        if unknown:  # a typo would otherwise backfill an all-empty label and drop the files silently
+        if unknown:
             raise ValueError(f"label {key!r}: unknown keys {unknown}, known: {list(_LABEL_KEYS)}")
         thumb = value.get("thumbnail")
-        if thumb is True:  # flag used to be a bool, the renderer kind now lives here
-            raise ValueError(f"label {key!r}: thumbnail: use 'hillshade', 'rgb', or 'pointcloud', not true")
-        if thumb is False:
-            value["thumbnail"] = thumb = None
-        if not (thumb is None or thumb in _THUMB_KINDS):  # a typo would render as rgb, silently
+        if not (thumb is None or thumb in _THUMB_KINDS):
             raise ValueError(f"label {key!r}: thumbnail {thumb!r} is not a renderer kind, "
                              f"use one of {list(_THUMB_KINDS)} or null")
         missing = [k for k in _LABEL_KEYS if k not in value]
@@ -260,7 +256,6 @@ def _validate(stem_patterns, labels) -> None:
         for k in missing:
             default = _LABEL_DEFAULTS[k]
             value[k] = list(default) if isinstance(default, list) else default
-        # harmless for an ignore label (dropped in discover before kind is read),
-        # a build failure for anything else
+        # fine for an ignore label, a build failure for anything else
         report = log.debug if value["category"] == "ignore" else log.warning
         report(f"label {key!r}: missing keys {missing}, defaulted to empty")

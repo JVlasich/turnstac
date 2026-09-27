@@ -38,10 +38,10 @@ class Asset:
     path: Path
     label: str
     category: str
-    kind: str          # pcl | raster  (dispatches extract.py @reader)
+    kind: str          # pcl | raster, picks the extract.readers entry
     stac_roles: list
     media_type: str
-    extensions: list   # which @populators run
+    extensions: list   # which build.py populators run
     cloud_native: bool
     thumbnail: str | None = None  # registry renderer kind: rgb | hillshade | pointcloud
     sidecars: list = field(default_factory=list)  # Paths matched by full basename
@@ -271,7 +271,7 @@ def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
     files = _walk(folder)
     sidecars = [f for f in files if _sidecar_ext(f.name)]
     # campaign.yaml is the per-campaign sidecar, never an asset
-    candidates = [f for f in files if not _sidecar_ext(f.name) and f.name.lower() not in {"campaign.yaml", "campaign.yml"}]
+    candidates = [f for f in files if not _sidecar_ext(f.name) and f.name.lower() != "campaign.yaml"]
 
     if exclude:
         kept = []
@@ -305,8 +305,6 @@ def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
     seen_ids: dict = {}
     for m in sorted(matches, key=lambda m: m.path.name):
         item_id = qualify_id(_item_id(m.path.name, m.ext), id_prefix)
-        # if item_id[:1].isupper():
-        #     log.warning(f"id starts with an uppercase letter (kept as-is): {item_id}")
         if item_id in seen_ids:
             raise ValueError(f"id collision: {item_id!r} from {seen_ids[item_id]} and {m.path.name}")
         seen_ids[item_id] = m.path.name

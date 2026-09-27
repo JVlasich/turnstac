@@ -116,6 +116,27 @@ def test_subcollection_id_not_doubled_and_asset_href_modes(tmp_path, write_tif):
             == "./pielach_2024-10-09_dsm_etrs89_thumbnail.png")
 
 
+def test_thumbnail_href_relative_through_symlinked_root(tmp_path, write_tif):
+    """resolve() respelled the thumbnail path (symlink, or a Windows mapped drive to
+    //server/share), so make_relative_href could not relate it to the item self href
+    and the absolute path leaked into the catalog."""
+    real = tmp_path / "real"
+    camp = real / "2024-10-09"
+    camp.mkdir(parents=True)
+    write_tif(camp / "pielach_2024-10-09_dsm_etrs89.tif", 10)
+    (camp / "campaign.yaml").write_text("", encoding="utf-8")
+    root = tmp_path / "link"
+    try:
+        root.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks not permitted here")
+
+    out = root / "catalog"
+    update_catalog(root, out, RunPolicy())
+    assert (_raw_href(out, "pielach_2024-10-09_dsm_etrs89", "thumbnail")
+            == "./pielach_2024-10-09_dsm_etrs89_thumbnail.png")
+
+
 def test_dateless_subcollection_ids_qualified_per_campaign(tmp_path, write_tif):
     """A subdir without an ISO date token (a hand-made tiles/) is not campaign-unique on
     its own: two campaigns would publish two collections with one id."""
@@ -415,11 +436,11 @@ def test_optional_sidecar(tmp_path, write_tif, monkeypatch):
     assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
     assert not any("no campaign.yaml" in w for w in res["warnings"]), res["warnings"]
 
-    # both spellings present: warned, .yaml wins (the .yml crs would have forced a rebuild)
+    # campaign.yml is not a sidecar: not read (its crs would force a rebuild), warned as unknown
     (camp / "campaign.yml").write_text('crs: "EPSG:4326"\n', encoding="utf-8")
     res = update_catalog(tmp_path, out, RunPolicy())
     assert _counts(res, "2024-04-04") == {"rebuilt": 0, "refreshed": 0, "reused": 1, "stale": 0, "failed": 0}, res
-    assert any("both present" in w for w in res["warnings"]), res["warnings"]
+    assert any("campaign.yml" in w for w in res["warnings"]), res["warnings"]
 
     # a dangling sidecar symlink is a missing sidecar, not a failed campaign
     (camp / "campaign.yml").unlink()

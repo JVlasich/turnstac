@@ -65,13 +65,3 @@ def opals_log(mod) -> None:
     target.fileLogLevel = opals.Types.LogLevel.none
     if hasattr(target, "logFile"):
         target.logFile = os.path.join(tempfile.gettempdir(), "opalsLog.xml")
-
-
-if __name__ == "__main__":
-    setup("debug" if "-v" in sys.argv else "info")
-    log = logging.getLogger("stac.core.log")
-    log.debug("debug message (only with -v)")
-    log.info("info message")
-    log.warning("warning message")
-    log.error("error message")
-    print("log self-check ok")

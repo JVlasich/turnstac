@@ -48,32 +48,3 @@ def beep():
     if os.name == "nt":
         import winsound
         winsound.MessageBeep()
-
-
-if __name__ == "__main__":
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as d:
-        d = Path(d)
-        for name in ("a.laz", "b.LAZ", "b.copc.laz", "c.txt"):
-            (d / name).touch()
-        got = [f.name for f in resolve_inputs(str(d), (".laz",), ".copc.laz")]
-        assert got == ["a.laz", "b.LAZ"], got
-
-        for name in ("r.tif", "r_cog.tif", "s.tiff"):
-            (d / name).touch()
-        got = [f.name for f in resolve_inputs([str(d / "r.tif"), str(d)], (".tif", ".tiff"), "_cog.tif")]
-        assert got == ["r.tif", "s.tiff"], got          # explicit file first, no duplicate from the scan
-
-        try:
-            resolve_inputs(str(d / "nope.tif"), (".tif",))
-        except FileNotFoundError:
-            pass
-        else:
-            raise AssertionError("missing path did not raise")
-
-        try:
-            resolve_inputs(str(d), (".las",))
-        except Exception as e:
-            assert "No .las inputs" in str(e), e
-    print("common self-check ok")

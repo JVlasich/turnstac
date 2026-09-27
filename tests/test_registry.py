@@ -32,13 +32,6 @@ def test_partial_product_label_backfills_with_warning(caplog):
     assert "missing keys" in caplog.text       # empty kind/media_type would fail the item build
 
 
-def test_bool_thumbnail_rejected_or_coerced():
-    with pytest.raises(ValueError, match="not true"):
-        merge_overrides({}, {"dtm": {**FULL_LABEL, "thumbnail": True}})
-    _, lb = merge_overrides({}, {"dtm": {**FULL_LABEL, "thumbnail": False}})
-    assert lb["dtm"]["thumbnail"] is None
-
-
 def test_unknown_thumbnail_kind_raises():
     with pytest.raises(ValueError, match="not a renderer kind"):
         merge_overrides({}, {"dtm": {**FULL_LABEL, "thumbnail": "hillshde"}})

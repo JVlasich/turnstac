@@ -1,7 +1,6 @@
-"""item + collection builders, id/datetime/geometry, extension wiring, thumbnails"""
+"""item + collection builders, id/datetime/geometry, extension wiring"""
 import re
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import Callable, Sequence
 
 import pystac
@@ -130,7 +129,7 @@ def _pc_encoding(href: str) -> str:
 # statistics.count stays out: extract derives it from the mask band's mean
 _STAT_KEYS = ("minimum", "maximum", "mean", "stddev", "valid_percent")
 
-# what a band is, never what it measures: these identify a band and are never attached
+# band identity, never moved up onto the asset
 _BAND_IDENTITY = {"name", "eo:common_name"}
 
 # pystac 1.14.3 doesnt fully support the new unified bands array
@@ -142,8 +141,7 @@ _RASTER_V2 = "https://stac-extensions.github.io/raster/v2.0.0/schema.json"
 @extension("bands")
 def _populate_bands(item, pa, meta, fm) -> None:
     """STAC 1.1 unified bands on the asset.
-    Values equal across all bands attached to the asset and the bands inherit them;
-    everything but identity attaches, an asset with one band is that band."""
+    Values shared by all bands move up to the asset; a single band moves up entirely."""
     multi = len(meta.raster_bands) > 1
     if meta.raster_bands:
         unknown = set(meta.raster_bands[0]["statistics"]) - set(_STAT_KEYS) - {"count"}
@@ -154,8 +152,7 @@ def _populate_bands(item, pa, meta, fm) -> None:
         stats = {k: b["statistics"][k] for k in _STAT_KEYS if b["statistics"].get(k) is not None}
         band = {}
         ci = b["color_interp"]
-        # "undefined" is GDAL's word for no colour at all; "gray" on a lone band adds
-        # nothing an asset with one band does not already state
+        # "undefined" means no colour; "gray" says nothing on a lone band
         label = None if ci == "undefined" or (not multi and ci == "gray") else ci
         name = b["description"] or label or (f"band{b['index']}" if multi else None)
         if name:
@@ -180,7 +177,6 @@ def _populate_bands(item, pa, meta, fm) -> None:
         pa.extra_fields[key] = bands[0][key]
         for b in bands:
             del b[key]
-    # dataset-level in AssetMeta, so never per-band to begin with
     for key, value in (("raster:sampling", meta.raster_sampling),
                        ("raster:spatial_resolution", meta.raster_spatial_resolution)):
         if value is not None:
@@ -197,9 +193,7 @@ def _populate_bands(item, pa, meta, fm) -> None:
 
 @extension("histogram")
 def _populate_histogram(item, pa, meta, fm) -> None:
-    """Height models only, single-banded, so _populate_bands has attached every field
-    onto the asset and left no bands array to carry this.
-    v2.0.0 allows the field on an asset for exactly that reading."""
+    """Single-band rasters only: the histogram sits on the asset, which raster v2.0.0 allows."""
     if len(meta.raster_bands) != 1:
         return
     hist = meta.raster_bands[0].get("histogram")
@@ -340,11 +334,7 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
 
 def refresh_item(prev, product, campaign: date, properties: dict | None = None) -> pystac.Item:
     """Carry a cataloged item over with the sidecar properties overlay reapplied.
-
-    The file is unchanged, so nothing is read and nothing is hashed: only the shaped
-    title and the overlay are restated, in build_item's order, and updated is stamped.
-    A key deleted from the sidecar is not undone (no marker of origin on the item), so
-    that case still needs --force.
+    No read, no hash. A key deleted from the sidecar is not undone, that needs --force.
 
     args:
       prev       - the item from the previous run
@@ -444,42 +434,3 @@ def build_collection(cid: str, meta: dict, items: list, children: Sequence = ())
     for i in items:
         coll.add_item(i)
     return coll
-
-
-# --- self-check ---
-
-if __name__ == "__main__":
-    import sys
-
-    from ..core.log import setup
-    from .discover import discover
-
-    setup()
-
-    # build items from real files (raster default, pass a dir for others)
-    args = sys.argv[1:]
-    folder = Path(args[0]) if args else Path("data/sample_tif")
-    products = discover(folder)
-    for p in products:
-        try:
-            camp = campaign_date(str(p.assets[0].path))
-        except ValueError:
-            camp = date(2023, 2, 8)  # sample files without a date token
-        item = build_item(p, camp)
-        # STAC 1.1 band invariants (no jsonschema here, so --validate cannot check them)
-        keys = set()
-        for label, a in item.assets.items():
-            where = f"{item.id}/{label}"
-            assert "eo:bands" not in a.extra_fields, f"{where}: pre-1.1 eo:bands"
-            assert "raster:bands" not in a.extra_fields, f"{where}: pre-1.1 raster:bands"
-            bands = a.extra_fields.get("bands", [])
-            assert all(bands), f"{where}: empty band object"
-            hist = a.extra_fields.get("raster:histogram")
-            assert not hist or not bands, f"{where}: asset histogram beside a bands array"
-            assert not hist or len(hist["buckets"]) == hist["count"], f"{where}: bucket count"
-            keys |= set(a.extra_fields) | {k for b in bands for k in b}
-        # a declared v2.0.0 extension without one of its fields fails require_fields
-        assert (_EO_V2 in item.stac_extensions) == ("eo:common_name" in keys), f"{item.id}: eo"
-        assert (_RASTER_V2 in item.stac_extensions) == any(
-            k.startswith("raster:") for k in keys), f"{item.id}: raster"
-        log.info(f"item {item.id}: dt={item.datetime} ext={len(item.stac_extensions)} assets={list(item.assets)}")

@@ -16,7 +16,6 @@ import yaml
 
 from .. import __version__
 from ..core import config
-from ..core.capabilities import laspy_available
 from ..core.registry import merge_overrides
 from .build import (
     _item_title, build_collection, build_item, campaign_date, merged_properties, refresh_item
@@ -79,13 +78,9 @@ def load_sidecar(path) -> dict:
 
 
 def _find_sidecar(folder: Path):
-    """Campaign sidecar path, case-insensitive, .yaml before .yml, else None."""
-    hits = {f.name.lower(): f for f in folder.iterdir()
-            if f.name.lower() in ("campaign.yaml", "campaign.yml") and f.is_file()}
-    if len(hits) > 1:
-        log.warning(f"{folder.name}: campaign.yaml and campaign.yml both present, "
-                    f"using campaign.yaml")
-    return hits.get("campaign.yaml") or hits.get("campaign.yml")
+    """Campaign sidecar path, case-insensitive, else None."""
+    return next((f for f in folder.iterdir()
+                 if f.name.lower() == "campaign.yaml" and f.is_file()), None)
 
 
 def _register_id(seen: dict | None, new_id: str, kind: str, source: str, policy: str) -> None:
@@ -118,9 +113,7 @@ def _stored_file_fields(item, label: str):
     return size, mh[4:]
 
 
-# properties and patterns are reconciled per item instead (_needs_refresh, _asset_shape_ok):
-# a properties edit shows in the item it produced, and a patterns edit surfaces as a changed
-# asset label, a changed item id or an unmatched file. ADR 0008
+# only keys that leave no trace on the item; properties and patterns are checked per item
 _GATE_KEYS = ("labels", "crs")
 
 
@@ -136,9 +129,7 @@ def _needs_rebuild(product, existing_item) -> bool:
     """Size shortcut, then sha256 confirm. A computed hash rides on the asset so
     build_item never hashes twice.
     """
-    # Gates the first asset only (products are single-asset today), and only the data
-    # asset: a hand-deleted co-located thumbnail or sidecar leaves a dangling href until
-    # the next --force run.
+    # first (data) asset only: a hand-deleted thumbnail or sidecar dangles until --force
     a = product.assets[0]
     stored = _stored_file_fields(existing_item, a.label)
     if stored is None:
@@ -152,11 +143,7 @@ def _needs_rebuild(product, existing_item) -> bool:
 
 def _asset_shape_ok(product, item) -> bool:
     """The item's data asset still carries the roles and media type the registry says.
-
-    Only part of the gate that notices an edit to the LABELS defaults in registry.py,
-    which no sidecar digest covers. An asset missing under the label already fails
-    _stored_file_fields, so label and id remaps stay covered there.
-    """
+    Catches edits to the LABELS defaults, which no sidecar digest covers."""
     a = product.assets[0]
     ia = item.assets.get(a.label)
     if ia is None:
@@ -193,8 +180,7 @@ def _queue_coll_thumb(sub, node, rebuilt_ids: set, parent_of: dict) -> CollThumb
         skipped = sorted(p.id for p in pcl if p not in flagged)
         log.warning(f"{sub.id} thumbnail covers {len(flagged)}/{len(pcl)} tiles, "
                     f"no registry renderer kind on: {skipped}")
-    # stale clones count as members: they sit in the collection, and comparing without
-    # them would report a change every run for as long as one is kept
+    # stale clones count as members, else a kept one reports a change every run
     ids = {i.id for i in sub.get_items()}
     was = {i for i, par in parent_of.items() if par == sub.id}
     changed = bool(rebuilt_ids & ids) or ids != was
@@ -261,10 +247,7 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
     stored_digest = (old.extra_fields or {}).get("sidecar:checksum") if old is not None else None
     sidecar_changed = old is not None and stored_digest != digest
     if sidecar_changed:
-        if stored_digest is None:  # catalog predates the gate: one full rebuild, then quiet
-            log.warning(f"no sidecar gate stored, rebuilding every item in {camp_id}")
-        else:
-            log.info(f"sidecar changed, rebuilding every item in {camp_id}")
+        log.info(f"sidecar changed, rebuilding every item in {camp_id}")
     existing, parent_of = {}, {}
     if old:
         for i in old.get_items(recursive=True):
@@ -315,8 +298,7 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
                  and _asset_shape_ok(p, prev) and not _needs_rebuild(p, prev))
         secs["hash"] += perf_counter() - t
         if carry:
-            # file and asset shape unchanged: a properties edit is patched into the item,
-            # no reader call, no rehash, and out of rebuilt_ids so no thumbnail re-render
+            # unchanged file: patch a properties edit in, no re-read, no thumbnail re-render
             if _needs_refresh(p, prev, props, camp):
                 if not policy.dry_run:
                     p.item = refresh_item(prev, p, camp, props)
@@ -380,8 +362,7 @@ def process_campaign(folder, root, policy: RunPolicy, *, seen_ids: dict | None =
     for node in nodes[1:]:
         if not node.products:
             continue
-        # usually the subdir already carries the campaign (pre-tool writes <stem>_tiles);
-        # qualify the ones that do not, same rule as item ids
+        # date-less subdir names get the campaign prefix, same rule as item ids
         sub_id = qualify_id(node.name, camp_id)
         _register_id(seen_ids, sub_id, "subcollection", folder.name, policy.id_collisions)
         cat = node.products[0].category
@@ -584,21 +565,14 @@ def update_catalog(root, out_dir, policy: RunPolicy) -> dict:
                 # hrefs are only defined now, so every campaign's jobs drain here
                 item_jobs = [j for r in results.values() for j in r.thumb_jobs]
                 coll_jobs = [j for r in results.values() for j in r.coll_thumb_jobs]
-                # pcl thumbnails need laspy
-                pcl_ok = laspy_available()
-                if not pcl_ok and (coll_jobs
-                                   or any(j.kind == "pointcloud" for j in item_jobs)):
-                    log.warning("laspy/lazrs unavailable; skipping point-cloud thumbnails")
                 for job in item_jobs:
-                    if job.kind == "pointcloud" and not pcl_ok:
-                        continue
                     try:
                         href = render_thumbnail(job.item, job.src_path, job.kind)
                         job.item.add_asset("thumbnail", pystac.Asset(
                             href=href, media_type="image/png", roles=["thumbnail"]))
                     except Exception as e:
                         log.warning(f"thumbnail failed for {job.item.id}: {e}")
-                for job in (coll_jobs if pcl_ok else []):
+                for job in coll_jobs:
                     coll = job.coll
                     png = Path(coll.get_self_href()).parent / f"{coll.id}_thumbnail.png"
                     try:
@@ -607,7 +581,7 @@ def update_catalog(root, out_dir, policy: RunPolicy) -> dict:
                         # unlike items, collections are rebuilt from scratch every run and
                         # carry no assets forward: attach on the skip path too
                         coll.add_asset("thumbnail", pystac.Asset(
-                            href=png.resolve().as_posix(), media_type="image/png",
+                            href=png.as_posix(), media_type="image/png",
                             roles=["thumbnail"]))
                     except Exception as e:
                         log.warning(f"thumbnail failed for {coll.id}: {e}")
@@ -657,8 +631,7 @@ def _git_commit() -> str | None:
 
 def _write_report(res: dict, out_dir: Path, **knobs) -> None:
     """Machine-readable run report next to the catalog, overwritten each run (dry runs
-    included). Not a STAC object, but it belongs to the catalog it describes.
-    version + commit name the code that wrote it, the only provenance a bundle can give."""
+    included). version + commit name the code that wrote it."""
     report = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "version": __version__, "commit": _git_commit(), **knobs, **res}
     out_dir.mkdir(parents=True, exist_ok=True)

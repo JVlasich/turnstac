@@ -3,8 +3,8 @@ Tile and convert pointcloud:
 Tiles a LAZ file with OPALS, converts the tiles to COPC.
 
 Usage:
-    python tile_and_convert.py --infile file.laz [--config config.yaml] [--outdir dir]
-    python tile_and_convert.py --init [config.yaml]
+    python -m turnstac.pre.tac_pcl --infile file.laz [--config config.yaml] [--outdir dir]
+    python -m turnstac.pre.tac_pcl --init [config.yaml]
 
 Requires: opals
 """
@@ -23,9 +23,8 @@ from pathlib import Path
 from ..core.log import setup, opals_log
 from .common import resolve_inputs, beep, _BIN, _COPCINDEX
 
-#import opals
 from opals import Import, pyDM
-from opals.workflows import preTiling, preCutting # concidering _import
+from opals.workflows import preTiling, preCutting
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ DEFAULTS = {
     "distribute": None,
     "tileSize_odm": 20.0,
     "tmp_path": "./tmp",
-    "pointOrigin": None,#"529000;5340000",
+    "pointOrigin": None,
     "tileSize": 500,
     "keepodm": True,
     "buffer": 0,
@@ -319,17 +318,15 @@ def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Pat
     if not infile.is_file():
         raise FileNotFoundError(f"Input file not found: {infile}")
 
-    # OPALS Logger always writes XML logs to CWD — redirect to work dir
+    # OPALS writes its XML logs to CWD, so run inside the work dir
     original_cwd = Path.cwd()
     os.chdir(str(work))
     try:
-        # Import to ODM
         log.info(f"Importing {infile.name} to ODM...")
         import_laz_file(infile, work, cfg["nbThreads"], cfg["tileSize_odm"])
         odm_path = work / infile.with_suffix(".odm").name
         header = pyDM.Datamanager.getHeaderODM(str(odm_path))
 
-        # Create tile grid
         log.info("Creating tile grid...")
         # infer pointorigin from bbox if not provided
         # shift by half LAS resolution so quantized coords never sit exactly on tile edges (dupes)
@@ -337,13 +334,13 @@ def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Pat
         origin = cfg["pointOrigin"] if cfg["pointOrigin"] else f"{box.xmin - 0.0005};{box.ymin - 0.0005}"
         pretile(header, work, cfg["nbThreads"], origin, cfg["tileSize"])
 
-        # Cut tiles — LAZ goes to tile_tmp, not outdir
+        # LAZ tiles go to tile_tmp, not outdir
         log.info("Cutting tiles...")
         precut(infile, cfg["buffer"], tile_tmp, cfg["nbThreads"], cfg["distribute"], work)
     finally:
         os.chdir(str(original_cwd))
 
-    # Group runt tiles with neighbors, then convert — skip outputs already in outdir
+    # group runt tiles with neighbors, then convert; existing outputs are skipped
     groups = plan_tile_groups(tile_tmp, origin, cfg["tileSize"], cfg["mergeBelow"])
     warn_stale(groups, outdir)
     convert_groups(groups, tile_tmp, outdir)
@@ -359,12 +356,10 @@ def main():
     cli_args = parser.parse_args()
     setup(cli_args.loglevel)
 
-    # --init: generate template and exit
     if cli_args.init is not None:
         config.generate_template_config(namespace, Path(cli_args.init))
         sys.exit(0)
 
-    # Load config file
     if cli_args.config is not None:
         config_path = Path(cli_args.config)
         if not config_path.is_file():
@@ -391,7 +386,7 @@ def main():
     def outdir_for(infile: Path) -> Path:
         if explicit_outdir is None:                 # default: beside each input
             return Path(str(infile.with_suffix("")) + "_tiles")
-        if len(inputs) == 1:                        # single input: exact dir (back-compat)
+        if len(inputs) == 1:                        # single input: exact dir
             return explicit_outdir
         return explicit_outdir / (infile.stem + "_tiles")  # multi: parent root
 

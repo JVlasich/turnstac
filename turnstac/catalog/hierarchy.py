@@ -50,7 +50,7 @@ def resolve_hierarchy(products, hier: dict | None = None) -> list[Node]:
     used: set = set()
     warned: set = set()
     for p in products:
-        # hits are collected even when an exact key wins: a shadowed pattern is not a typo
+        # a pattern shadowed by an exact key still counts as used
         hits = _pattern_hits(p.id, patterns)
         used.update(hits)
         if p.id in placement:

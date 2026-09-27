@@ -1,9 +1,6 @@
 """RunPolicy: run-wide knobs, built once from config, passed down unchanged.
 
-One default per field, declared here. `CATALOG_DEFAULTS` derives the config template from
-`config_defaults()`; `cli.main` builds the instance with `from_config()` and hands the same
-object to update_catalog -> process_campaign -> discover. Root metadata (id/title/license/
-providers) and the OPALS options stay out: not per-run policy.
+One default per field, declared here; `CATALOG_DEFAULTS` derives the config template from them.
 """
 
 from dataclasses import dataclass, fields
@@ -37,14 +34,13 @@ class RunPolicy:
     validate: bool = False                               # STAC-validate after save (needs pystac[validation])
     unknown_assets: Literal["warn", "skip", "raise"] = "warn"    # unclassifiable files
     non_cloud_native: Literal["warn", "skip", "raise"] = "warn"  # files without a CN twin
-    # a COG failing the structure validator. media_type is the catalog's only cloud-native
-    # indicator, so demote publishes it as a plain GeoTIFF rather than let the type lie
+    # COGs failing the validator; demote publishes them as plain GeoTIFF
     invalid_cog: Literal["warn", "demote", "raise"] = "demote"
     only: str | None = None                              # glob over campaign dir names; skips the stale-collection sweep
     id_collisions: Literal["warn", "raise"] = "warn"     # duplicate item/subcollection ids across campaigns
     asset_hrefs: Literal["absolute", "relative"] = "absolute"  # relative (self-contained) | absolute (build-time paths)
     min_points: int = 1000                               # drop point-cloud items below this pc:count (degenerate tiles)
-    thumbnails: bool = True                              # render PNG thumbnails for raster items (ortho/DSM/DTM)
+    thumbnails: bool = True                              # render PNG thumbnails per the registry
 
     def __post_init__(self):
         """Every Literal field must hold one of its declared values."""
