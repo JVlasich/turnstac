@@ -504,6 +504,8 @@ def update_catalog(root, out_dir, policy: RunPolicy) -> dict:
     root, out_dir = Path(root), Path(out_dir)
     t_start = perf_counter()
     cat = _load_or_create_root(out_dir)
+    # --stale remove also deletes the files the saved catalog stops pointing to
+    before = _tree_files(cat, out_dir) if policy.stale == "remove" and not policy.dry_run else set()
 
     ok, failed, stale_colls, validation, fatal = {}, {}, [], None, None
     results: dict = {}          # campaign -> CampaignResult, drained for thumbnail jobs below
@@ -597,6 +599,17 @@ def update_catalog(root, out_dir, policy: RunPolicy) -> dict:
             t = perf_counter()
             cat.save(catalog_type=pystac.CatalogType.SELF_CONTAINED)
             secs["save"] = perf_counter() - t
+            if before:
+                for p in sorted(before - _tree_files(cat, out_dir)):
+                    try:
+                        p.unlink(missing_ok=True)
+                        log.info(f"removed file: {p}")
+                        for d in p.parents:  # prune emptied dirs up to out
+                            if d == out_dir.resolve() or any(d.iterdir()):
+                                break
+                            d.rmdir()
+                    except OSError as e:  # the catalog is saved, a leftover is no failure
+                        log.warning(f"could not remove {p}: {e}")
             log.info(f"catalog saved: {out_dir}")
             if policy.validate:
                 validation = _validate_catalog(cat)
@@ -627,6 +640,16 @@ def _git_commit() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout.strip() if p.returncode == 0 else None
+
+
+def _tree_files(cat, out_dir: Path) -> set[Path]:
+    """Resolved paths of every collection, item and thumbnail file inside out_dir."""
+    out = out_dir.resolve()
+    objs = list(chain(cat.get_all_collections(), cat.get_items(recursive=True)))
+    hrefs = [o.get_self_href() for o in objs] + [
+        a.get_absolute_href() for o in objs for a in o.assets.values()
+        if "thumbnail" in (a.roles or [])]
+    return {p for p in (Path(h).resolve() for h in hrefs if h) if out in p.parents}
 
 
 def _write_report(res: dict, out_dir: Path, **knobs) -> None:
