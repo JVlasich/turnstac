@@ -18,12 +18,13 @@ import struct
 import subprocess
 import sys
 import textwrap
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from ..core.log import setup, opals_log
 from .common import resolve_inputs, beep, _BIN, _COPCINDEX
 
-from opals import Import, pyDM
+from opals import Import, Info, pyDM
 from opals.workflows import preTiling, preCutting
 
 log = logging.getLogger(__name__)
@@ -76,15 +77,35 @@ def pretile(header, tmp_path: Path, nbThreads: int, pointOrigin: str, tileSize: 
     return pret
 
 
+def export_ofd(infile: Path, tmp_path: Path) -> Path:
+    """LAS 1.4 PDRF 7 OFD carrying every extra byte of infile with its on-disk type, scale and offset."""
+    ofd = tmp_path / (infile.stem + "_ofd.xml")
+    inf = Info.Info()
+    opals_log(inf)
+    inf.inFile = [str(infile)]  # type: ignore
+    inf.generateOFD.file = str(ofd)  # type: ignore
+    inf.run()
+    tree = ET.parse(ofd)
+    las = tree.getroot().find("las")
+    las.set("versionMinor", "4")
+    las.set("pointDataRecordFormat", "7")
+    for eb in las.findall("extraBytes"):
+        if "lasType" in eb.attrib:
+            eb.attrib.setdefault("scale", "1")
+            eb.attrib.setdefault("offset", "0")
+    tree.write(ofd, encoding="utf-8", xml_declaration=True)
+    return ofd
+
+
 def precut(infile: Path, buffer: int, export_dir: Path, nbThreads: int,
-           distribute: int, tmp_path: Path):
+           distribute: int, tmp_path: Path, oformat: Path):
     prec = preCutting.preCutting()
     prec.shapefile = str(tmp_path / "Tiles.shp")  # type: ignore
     prec.vector = str(tmp_path / infile.with_suffix(".odm").name)  # type: ignore
     prec.buffer = buffer
     prec.export = str(export_dir / infile.name)  # type: ignore
     prec.skipIfExists = True  # type: ignore
-    prec.oformat = "<l v='4' p='6'/>"
+    prec.oformat = str(oformat)
     if nbThreads:
         prec.nbThreads = nbThreads  # type: ignore
     if distribute:
@@ -336,7 +357,8 @@ def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Pat
 
         # LAZ tiles go to tile_tmp, not outdir
         log.info("Cutting tiles...")
-        precut(infile, cfg["buffer"], tile_tmp, cfg["nbThreads"], cfg["distribute"], work)
+        ofd = export_ofd(infile, work)
+        precut(infile, cfg["buffer"], tile_tmp, cfg["nbThreads"], cfg["distribute"], work, ofd)
     finally:
         os.chdir(str(original_cwd))
 
