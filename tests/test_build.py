@@ -28,9 +28,25 @@ def test_campaign_date_iso_token():
 
 def test_pc_datetime_weekseconds():
     # 2023-02-08 is a Wednesday, GPS week starts Sunday 2023-02-05
-    start, end = resolve_pc_datetime(100.0, 200.0, CAMP)
-    assert start == datetime(2023, 2, 5, 0, 1, 40, tzinfo=timezone.utc), start
+    start, end = resolve_pc_datetime(86500.0, 86600.0, CAMP)
+    assert start == datetime(2023, 2, 6, 0, 1, 40, tzinfo=timezone.utc), start
     assert (end - start).total_seconds() == 100
+
+
+def test_pc_datetime_seconds_of_day():
+    # below one day: seconds of day on the campaign date, not the Sunday of its week (2015-03-20 data)
+    start, end = resolve_pc_datetime(45225.8, 48460.5, date(2015, 3, 20))
+    assert start.date() == end.date() == date(2015, 3, 20), start
+    assert (start.hour, start.minute) == (12, 33)
+
+
+def test_pc_datetime_anchor_from_filename():
+    # flight in the GPS week before the campaign: the filename date anchors it, not 7 days late
+    thu_noon = 4 * 86400 + 43200
+    start, _ = resolve_pc_datetime(thu_noon, thu_noon + 60, CAMP, anchor=date(2023, 2, 2))
+    assert start == datetime(2023, 2, 2, 12, tzinfo=timezone.utc), start
+    start, _ = resolve_pc_datetime(43200.0, 43260.0, CAMP, anchor=date(2023, 2, 6))
+    assert start == datetime(2023, 2, 6, 12, tzinfo=timezone.utc), start
 
 
 def test_pc_datetime_adjusted_standard_round_trip():
@@ -291,6 +307,14 @@ def test_build_item_pointcloud(tmp_path, write_las):
     asset = item.assets["pointcloud_las"]
     assert asset.media_type == "application/vnd.las"
     assert asset.extra_fields["file:checksum"].startswith("1220")
+
+
+def test_build_item_pointcloud_filename_date_anchors_gps(tmp_path, write_las):
+    pytest.importorskip("opals")  # the pcl reader calls opalsInfo
+    # seconds of day in a file named two days before the campaign -> that day, not the campaign day
+    write_las(tmp_path / "pielach_2023-02-06_ground.las", gps=(43200, 46800))
+    item = build_item(discover(tmp_path)[0], CAMP, crs="EPSG:31256")
+    assert item.common_metadata.start_datetime == datetime(2023, 2, 6, 12, tzinfo=timezone.utc)
 
 
 def test_build_item_pointcloud_copc_encoding(tmp_path, write_las):

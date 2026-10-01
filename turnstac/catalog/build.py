@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 _GPS_EPOCH = datetime(1980, 1, 6, tzinfo=timezone.utc)
 _WEEK = 604800  # seconds
+_DAY = 86400  # seconds
 _MAX_DEVIATION_DAYS = 14  # derived datetime (gps or filename) further than this from the campaign is rejected
 
 
@@ -28,11 +29,14 @@ def campaign_date(name: str) -> date:
     return date.fromisoformat(m.group())
 
 
-def resolve_pc_datetime(gps_min, gps_max, campaign: date) -> tuple[datetime, datetime] | None:
+def resolve_pc_datetime(gps_min, gps_max, campaign: date,
+                        anchor: date | None = None) -> tuple[datetime, datetime] | None:
     """Raw GPSTime min/max -> (start, end) UTC.
     Above one week = adjusted standard GPS time (seconds since GPS epoch minus 1e9);
-    else weekseconds, resolved against GPS week of the campaign date.
-    
+    below one day = seconds of day (not in the LAS spec, but found in the data), on the anchor date;
+    else weekseconds, resolved against GPS week of the anchor date.
+    anchor = filename date, defaults to the campaign date; the drift check stays on the campaign.
+
     returns:
       datetime tuple | None for absent or degenerate GPSTime -> caller falls back to campaign date.
     """
@@ -42,14 +46,16 @@ def resolve_pc_datetime(gps_min, gps_max, campaign: date) -> tuple[datetime, dat
     if gps_max > _WEEK:  # adjusted standard
         start = _GPS_EPOCH + timedelta(seconds=gps_min + 1e9)
         end = _GPS_EPOCH + timedelta(seconds=gps_max + 1e9)
-    else:  # weekseconds
+    else:  # weekseconds or seconds of day
+        anchor = anchor or campaign
         if gps_max < gps_min:
             log.warning(f"gps weekseconds wrap Sat->Sun ({gps_min} > {gps_max}), extending into next week")
             gps_max += _WEEK
-        week_start = (datetime.combine(campaign, datetime.min.time(), tzinfo=timezone.utc)
-                      - timedelta(days=(campaign.weekday() + 1) % 7))
-        start = week_start + timedelta(seconds=gps_min)
-        end = week_start + timedelta(seconds=gps_max)
+        origin = datetime.combine(anchor, datetime.min.time(), tzinfo=timezone.utc)
+        if gps_max >= _DAY:  # weekseconds count from the Sunday of the anchor week
+            origin -= timedelta(days=(anchor.weekday() + 1) % 7)
+        start = origin + timedelta(seconds=gps_min)
+        end = origin + timedelta(seconds=gps_max)
     # a stray min OR max poisons the extent; warn on drift, reject gross outliers
     for edge, dt in (("start", start), ("end", end)):
         dev = abs((dt.date() - campaign).days)
@@ -264,23 +270,20 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
 
     # baseline from the first asset (single-asset products today)
     _, m0, _ = extracted[0]
-    span = resolve_pc_datetime(m0.pc_gps_time_min, m0.pc_gps_time_max, campaign)
-    if span:
-        start = span[0]
-    else:
-        # no GPS time: filename ISO token is honored, unless it drifts too far from the campaign
-        try:
-            token = campaign_date(product.assets[0].path.name)
-            if abs((token - campaign).days) > _MAX_DEVIATION_DAYS:
-                log.warning(f"filename date {token} >2wk from campaign date {campaign}, using campaign "
-                            f"date (filename should encode image acquisition date, not processing "
-                            f"time): {product.id}")
-                token = campaign
-            elif token != campaign:
-                log.warning(f"filename date {token} deviates from campaign date {campaign}: {product.id}")
-        except ValueError:
+    # filename ISO token anchors GPS week/day seconds and is the datetime when there is no GPS time
+    try:
+        token = campaign_date(product.assets[0].path.name)
+        if abs((token - campaign).days) > _MAX_DEVIATION_DAYS:
+            log.warning(f"filename date {token} >2wk from campaign date {campaign}, using campaign "
+                        f"date (filename should encode image acquisition date, not processing "
+                        f"time): {product.id}")
             token = campaign
-        start = datetime.combine(token, datetime.min.time(), tzinfo=timezone.utc)
+        elif token != campaign:
+            log.warning(f"filename date {token} deviates from campaign date {campaign}: {product.id}")
+    except ValueError:
+        token = campaign
+    span = resolve_pc_datetime(m0.pc_gps_time_min, m0.pc_gps_time_max, campaign, token)
+    start = span[0] if span else datetime.combine(token, datetime.min.time(), tzinfo=timezone.utc)
 
     geometry, bbox = m0.geometry_wgs84, m0.bbox_wgs84
     if geometry is not None:
