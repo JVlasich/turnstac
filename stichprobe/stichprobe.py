@@ -7,6 +7,7 @@ usage: python stichprobe.py <item.json>
 import json
 import logging
 import math
+import struct
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,7 +31,13 @@ PDAL_DIMS = {
     "PointSourceId":       ("PointSourceId", 1),
     "GPSTime":             ("GpsTime", 1),
     "ChannelDesc":         ("ScanChannel", 1),
+    "Red":                 ("Red", 1),
+    "Green":               ("Green", 1),
+    "Blue":                ("Blue", 1),
 }
+# las extra bytes data type -> (size, pdal type name)
+EB_TYPES = {1: (1, "unsigned"), 2: (1, "signed"), 3: (2, "unsigned"), 4: (2, "signed"), 5: (4, "unsigned"),
+            6: (4, "signed"), 7: (8, "unsigned"), 8: (8, "signed"), 9: (4, "floating"), 10: (8, "floating")}
 # las classification flag bits 0-3, pdal splits them into separate dimensions
 FLAGS = ("Synthetic", "KeyPoint", "Withheld", "Overlap")
 
@@ -45,7 +52,56 @@ def check(name, a, b, ok):
 def exact(name, a, b): check(name, a, b, a == b)
 
 
-def close(name, a, b): check(name, a, b, math.isclose(a, b, rel_tol=0.01))
+def close(name, a, b): check(name, a, b, math.isclose(a, b, rel_tol=1e-4, abs_tol=5e-5))  # catalog rounds to 4 decimals
+
+
+def _key(name): return name.lstrip("_").replace(" ", "").lower()
+
+
+def pdal_dim(name, dims):
+    """opals attribute -> (pdal dimension, factor). Opals names extra bytes '_' + file name."""
+    if name in PDAL_DIMS:
+        return PDAL_DIMS[name]
+    return next((d for d in dims if _key(d) == _key(name)), None), 1
+
+
+def _descriptor(d):
+    """One 192 byte extra bytes descriptor -> (name, type, nodata, scale, offset)."""
+    dtype, opts = d[2], d[3]
+    fmt = "<d" if dtype >= 9 else "<q" if dtype % 2 == 0 else "<Q"
+    return {
+        "name": d[4:36].split(b"\0")[0].decode(),
+        "type": EB_TYPES.get(dtype),
+        "nodata": struct.unpack_from(fmt, d, 40)[0] if opts & 1 else None,
+        "scale": struct.unpack_from("<d", d, 112)[0] if opts & 8 else 1.0,
+        "offset": struct.unpack_from("<d", d, 136)[0] if opts & 16 else 0.0,
+    }
+
+
+def las_header(path):
+    """Point format and extra bytes descriptors (keyed by _key(name)), read straight from the las header."""
+    ebs = {}
+    with open(path, "rb") as f:
+        header_size, _, n_vlrs, point_format = struct.unpack_from("<HIIB", f.read(105), 94)
+        f.seek(header_size)
+        for _ in range(n_vlrs):
+            user, rid, length = struct.unpack("<2x16sHH32x", f.read(54))
+            data = f.read(length)
+            if user.rstrip(b"\0") == b"LASF_Spec" and rid == 4:
+                ebs = {_key(e["name"]): e for e in (_descriptor(data[i:i + 192]) for i in range(0, len(data), 192))}
+    return point_format & 0x3F, ebs  # laz sets the two high bits
+
+
+def extra_values(v, eb):
+    """Drops no-data values (opals skips them) and applies scale/offset unless PDAL already did.
+    No-data is compared exactly on the raw stored value."""
+    integer = eb["type"] is not None and eb["type"][1] != "floating"
+    scaled = integer and v.dtype.kind == "f" and (eb["scale"], eb["offset"]) != (1.0, 0.0)
+    raw = np.round((v - eb["offset"]) / eb["scale"]) if scaled else v
+    if eb["nodata"] is not None:
+        keep = raw != eb["nodata"]
+        v, raw = v[keep], raw[keep]
+    return v if scaled else raw * eb["scale"] + eb["offset"]
 
 
 def gps_to_utc(t, adjusted, near):
@@ -84,17 +140,30 @@ def pointcloud(props, path):
     exact("start_datetime", props.get("start_datetime"), gps_to_utc(pts["GpsTime"].min(), adjusted, near))
     exact("end_datetime", props.get("end_datetime"), gps_to_utc(pts["GpsTime"].max(), adjusted, near))
 
+    dims = pts.dtype.names
+    point_format, ebs = las_header(path)
     for s in props.get("pc:statistics", []):
-        dim, factor = PDAL_DIMS[s["name"]]
-        v = sum(pts[f] << i for i, f in enumerate(FLAGS)) if dim == "ClassFlags" else pts[dim] * factor
-        for key, ref in (("minimum", v.min()), ("maximum", v.max()), ("average", v.mean()), ("stddev", v.std())):
+        dim, factor = pdal_dim(s["name"], dims)
+        if dim is None:
+            check(f"{s['name']} Dimension", s["name"], None, False)
+            continue
+        v = sum(pts[f] << i for i, f in enumerate(FLAGS)) if dim == "ClassFlags" else pts[dim]
+        if _key(dim) in ebs:
+            v = extra_values(v, ebs[_key(dim)])
+        v = np.asarray(v, dtype=np.float64) * factor  # float32 sums lose precision over millions of points
+        if "count" in s:
+            exact(f"{s['name']} count", s["count"], int(v.size))
+        # opals reports the sample stddev (n - 1), gdal for rasters the population one (n)
+        for key, ref in (("minimum", v.min()), ("maximum", v.max()), ("average", v.mean()), ("stddev", v.std(ddof=1))):
             close(f"{s['name']} {key}", s[key], float(ref))
 
     schema = {d["name"]: (d["size"], d["type"]) for d in p.schema["schema"]["dimensions"] if d["name"] not in FLAGS}
     schema["ClassFlags"] = (1, "unsigned")  # the four flag bits share one byte in the file
+    schema["ScanAngleRank"] = (2, "signed") if point_format >= 6 else (1, "signed")
+    schema = {d: ebs[_key(d)]["type"] if _key(d) in ebs else t for d, t in schema.items()}
     exact("Dimensionen", len(props["pc:schemas"]), len(schema) - 3)  # X, Y, Z are not in pc:schemas
     for s in props["pc:schemas"]:
-        exact(f"Schema {s['name']}", (s["size"], s["type"]), schema.get(PDAL_DIMS[s["name"]][0]))
+        exact(f"Schema {s['name']}", (s["size"], s["type"]), schema.get(pdal_dim(s["name"], dims)[0]))
 
 
 def raster(props, asset, path):
@@ -111,16 +180,18 @@ def raster(props, asset, path):
     logging.getLogger("tifffile").setLevel(logging.ERROR)  # it cannot parse GDAL_NODATA = float32 max
     with tifffile.TiffFile(path) as tif:
         page = tif.pages[0]
-        geo = tif.geotiff_metadata
+        geo = tif.geotiff_metadata or {}  # None without GeoKeys, the catalog crs then came from the sidecar
         h, w, n = page.shape[0], page.shape[1], page.samplesperpixel
         assert page.planarconfig == 1, "only pixel interleaved tiffs"
 
-        exact("CRS-Code", props["proj:code"], f"EPSG:{int(geo['ProjectedCSTypeGeoKey'])}")
+        epsg = geo.get("ProjectedCSTypeGeoKey")
+        exact("CRS-Code", props["proj:code"], f"EPSG:{int(epsg)}" if epsg else None)
 
-        sx, sy = geo["ModelPixelScale"][:2]
-        i, j, _, x, y, _ = geo["ModelTiepoint"][:6]
+        # georeferencing tags are read directly, they exist without GeoKeys too
+        sx, sy = page.tags["ModelPixelScaleTag"].value[:2]
+        i, j, _, x, y, _ = page.tags["ModelTiepointTag"].value[:6]
         left, top = x - i * sx, y + j * sy
-        if geo["GTRasterTypeGeoKey"] == 2:  # PixelIsPoint: tiepoint sits on the pixel centre
+        if geo.get("GTRasterTypeGeoKey") == 2:  # PixelIsPoint: tiepoint sits on the pixel centre
             left, top = left - sx / 2, top + sy / 2
         exact("Bbox nativ", props["proj:bbox"], [left, top - h * sy, left + w * sx, top])
 

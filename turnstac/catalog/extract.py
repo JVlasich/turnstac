@@ -34,7 +34,7 @@ _MIN_AREA_RATIO = 0.5     # footprint below this share of the valid area -> bbox
 _MIN_CELL_M     = 6.0     # point-cloud grid cell floor; finer detail is simplified away anyway
 
 # what gdalinfo -hist reports
-_HIST_BUCKETS = 256
+_HIST_BUCKETS = 32
 
 
 @dataclass
@@ -287,12 +287,16 @@ def _histogram(band, minimum: float | None, maximum: float | None, path: str) ->
         log.warning(f"histogram skipped, no usable value range: {path}")
         return None
     width = (maximum - minimum) / (_HIST_BUCKETS - 1)
-    lo, hi = minimum - width / 2, maximum + width / 2
+    lo, hi = _r(minimum - width / 2), _r(maximum + width / 2)
     # include_out_of_range keeps the bucket sum at the valid pixel count, approx_ok=0 keeps the
     # distribution as exact as the statistics its edges come from
     return {"count": _HIST_BUCKETS, "min": lo, "max": hi,
             "buckets": band.GetHistogram(lo, hi, _HIST_BUCKETS, 1, 0)}
 
+def _r(value, kommastelle=4):
+    if not isinstance(value, (int, float)):
+        return value
+    return round(value, kommastelle)
 
 def raster(path: str, crs: str | None = None) -> AssetMeta:
     """Reader for raster metadata via GDAL, extracts:
@@ -342,7 +346,7 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
             "scale":        b.GetScale(),
             "offset":       b.GetOffset(),
             "bits_per_sample": int(nbits) if nbits else None,
-            "statistics":   {"minimum": minimum, "maximum": maximum, "mean": mean, "stddev": stddev,
+            "statistics":   {"minimum": _r(minimum), "maximum": _r(maximum), "mean": _r(mean), "stddev": _r(stddev),
                              "valid_percent": valid_percent, "count": count},
             "histogram":    hist,
         })
@@ -430,7 +434,7 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
             "stddev":  _finite(a.getStd()),
         } for a in attributes if a.getMin() != a.getMax()  # constant dims carry no signal
     ]
-    statistics = [{k: v for k, v in s.items() if v is not None} for s in statistics]
+    statistics = [{k: _r(v) for k, v in s.items() if v is not None} for s in statistics]
 
     # schemas list every dimension the file has, unfiltered (pc:schemas = truth)
     schemas = [

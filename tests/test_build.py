@@ -10,6 +10,7 @@ pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
 from turnstac.catalog.build import (_EO_V2, _GPS_EPOCH, _RASTER_V2, build_collection,
                                 build_item, campaign_date, resolve_pc_datetime)
 from turnstac.catalog.discover import discover
+from turnstac.catalog.extract import _HIST_BUCKETS
 
 CAMP = date(2023, 2, 8)
 
@@ -317,7 +318,7 @@ def test_build_item_histogram_lands_on_the_asset(tmp_path, write_gradient_tif):
     asset = item.assets["dsm"]
     hist = asset.extra_fields["raster:histogram"]
 
-    assert hist["count"] == 256 == len(hist["buckets"])
+    assert hist["count"] == _HIST_BUCKETS == len(hist["buckets"])
     assert "bands" not in asset.extra_fields
     assert "histogram" not in asset.extra_fields["statistics"]
     assert _RASTER_V2 in item.stac_extensions

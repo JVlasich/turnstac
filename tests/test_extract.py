@@ -7,7 +7,7 @@ pytest.importorskip("osgeo.gdal")  # these tests need the geo stack
 
 from osgeo import gdal, osr
 
-from turnstac.catalog.extract import raster
+from turnstac.catalog.extract import raster, _HIST_BUCKETS
 
 
 def _interior_rings(geom: dict) -> int:
@@ -204,14 +204,20 @@ def test_shattered_mask_falls_back_to_bbox(tmp_path, caplog):
 
 
 def test_histogram_bins_every_value(tmp_path, write_gradient_tif):
-    # 16x16 holding each Byte value once: 256 buckets of width 1, one pixel each. The edges
-    # are the data range padded half a bucket, so 0 and 255 sit on the outer bucket centres.
+    # 16x16 holding each Byte value 0..255 once. The edges are the data range padded half a
+    # bucket, so 0 and 255 sit on the outer bucket centres.
     write_gradient_tif(tmp_path / "dsm.tif")
     hist = raster(tmp_path / "dsm.tif").raster_bands[0]["histogram"]
 
-    assert hist["count"] == 256 == len(hist["buckets"]), hist["count"]
-    assert (hist["min"], hist["max"]) == (-0.5, 255.5)
-    assert hist["buckets"] == [1] * 256
+    width = 255 / (_HIST_BUCKETS - 1)
+    lo, hi = round(-width / 2, 4), round(255 + width / 2, 4)
+    expected = [0] * _HIST_BUCKETS
+    for v in range(256):
+        expected[min(int((v - lo) / (hi - lo) * _HIST_BUCKETS), _HIST_BUCKETS - 1)] += 1
+
+    assert hist["count"] == _HIST_BUCKETS == len(hist["buckets"]), hist["count"]
+    assert (hist["min"], hist["max"]) == (lo, hi)
+    assert hist["buckets"] == expected
     assert sum(hist["buckets"]) == 256, "every valid pixel binned"
 
 
