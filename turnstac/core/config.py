@@ -1,13 +1,13 @@
 import logging
+from pathlib import Path
 
 import yaml
-from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 _defaults = {}  # namespace: dict
-_file = {}      # namespace: dict
-_cli = {}       # namespace: dict
+_file = {}  # namespace: dict
+_cli = {}  # namespace: dict
 
 
 def register_defaults(namespace: str, defaults: dict) -> None:
@@ -19,7 +19,9 @@ def load_config(path: Path) -> None:
     path = Path(path)
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
-        raise TypeError(f"Config {path} must be a YAML mapping, not {type(data).__name__}")
+        raise TypeError(
+            f"Config {path} must be a YAML mapping, not {type(data).__name__}"
+        )
 
     for ns, values in data.items():
         if ns not in _defaults:
@@ -27,7 +29,9 @@ def load_config(path: Path) -> None:
         if values is None:
             continue  # section present but empty (all keys commented) = no overrides
         if not isinstance(values, dict):
-            raise TypeError(f"Section '{ns}' in {path} must be a mapping, not {type(values).__name__}")
+            raise TypeError(
+                f"Section '{ns}' in {path} must be a mapping, not {type(values).__name__}"
+            )
         for key in values:
             if key not in _defaults[ns]:
                 log.warning(f"unknown key '{ns}.{key}' in {path}")

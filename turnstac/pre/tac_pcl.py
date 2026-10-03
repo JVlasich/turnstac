@@ -21,11 +21,11 @@ import textwrap
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from ..core.log import setup, opals_log
-from .common import resolve_inputs, beep, _BIN, _COPCINDEX
-
 from opals import Import, Info, pyDM
-from opals.workflows import preTiling, preCutting
+from opals.workflows import preCutting, preTiling
+
+from ..core.log import opals_log, setup
+from .common import _BIN, _COPCINDEX, beep, resolve_inputs
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def pretile(header, tmp_path: Path, nbThreads: int, pointOrigin: str, tileSize: 
         pret.nbThreads = nbThreads  # type: ignore
     opals_log(pret)
     pret.export = str(tmp_path)  # type: ignore
-    pret.run() # type: ignore
+    pret.run()  # type: ignore
     return pret
 
 
@@ -97,8 +97,15 @@ def export_ofd(infile: Path, tmp_path: Path) -> Path:
     return ofd
 
 
-def precut(infile: Path, buffer: int, export_dir: Path, nbThreads: int,
-           distribute: int, tmp_path: Path, oformat: Path):
+def precut(
+    infile: Path,
+    buffer: int,
+    export_dir: Path,
+    nbThreads: int,
+    distribute: int,
+    tmp_path: Path,
+    oformat: Path,
+):
     prec = preCutting.preCutting()
     prec.shapefile = str(tmp_path / "Tiles.shp")  # type: ignore
     prec.vector = str(tmp_path / infile.with_suffix(".odm").name)  # type: ignore
@@ -111,7 +118,7 @@ def precut(infile: Path, buffer: int, export_dir: Path, nbThreads: int,
     if distribute:
         prec.distribute = distribute  # type: ignore
     opals_log(prec)
-    prec.run() # type: ignore
+    prec.run()  # type: ignore
     return prec
 
 
@@ -134,31 +141,49 @@ def group_tiles(tiles: list, threshold: float) -> list:
     member first (it names the merged output). Deterministic: smallest runt merges
     first, into its smallest adjacent group; name breaks ties.
     """
-    groups = [{"members": [(name, size)], "cells": {cell}, "size": size}
-              for name, size, cell in sorted(tiles)]
+    groups = [
+        {"members": [(name, size)], "cells": {cell}, "size": size}
+        for name, size, cell in sorted(tiles)
+    ]
 
     def adjacent(a, b):
-        return any(abs(ax - bx) + abs(ay - by) == 1
-                   for ax, ay in a["cells"] for bx, by in b["cells"])
+        return any(
+            abs(ax - bx) + abs(ay - by) == 1
+            for ax, ay in a["cells"]
+            for bx, by in b["cells"]
+        )
 
     while True:
         order = sorted(groups, key=lambda g: (g["size"], g["members"][0][0]))
-        runt = next((g for g in order if g["size"] < threshold
-                     and any(adjacent(g, o) for o in groups if o is not g)), None)
+        runt = next(
+            (
+                g
+                for g in order
+                if g["size"] < threshold
+                and any(adjacent(g, o) for o in groups if o is not g)
+            ),
+            None,
+        )
         if runt is None:
             break
-        target = min((g for g in groups if g is not runt and adjacent(runt, g)),
-                     key=lambda g: (g["size"], g["members"][0][0]))
+        target = min(
+            (g for g in groups if g is not runt and adjacent(runt, g)),
+            key=lambda g: (g["size"], g["members"][0][0]),
+        )
         target["members"] += runt["members"]
         target["cells"] |= runt["cells"]
         target["size"] += runt["size"]
         groups.remove(runt)
 
-    return [[n for n, s in sorted(g["members"], key=lambda m: (-m[1], m[0]))]
-            for g in sorted(groups, key=lambda g: g["members"][0][0])]
+    return [
+        [n for n, s in sorted(g["members"], key=lambda m: (-m[1], m[0]))]
+        for g in sorted(groups, key=lambda g: g["members"][0][0])
+    ]
 
 
-def plan_tile_groups(tile_tmp: Path, point_origin: str, tile_size: float, merge_below: float) -> list:
+def plan_tile_groups(
+    tile_tmp: Path, point_origin: str, tile_size: float, merge_below: float
+) -> list:
     """Scan cut tiles, group runts (< mergeBelow MB) with their grid neighbors.
     Returns groups as LAZ path lists, largest first."""
     ox, oy = (float(v) for v in point_origin.split(";"))
@@ -167,8 +192,10 @@ def plan_tile_groups(tile_tmp: Path, point_origin: str, tile_size: float, merge_
         if laz.name.endswith(".copc.laz"):
             continue
         xmin, ymin, xmax, ymax = read_las_bbox(laz)
-        cell = (math.floor(((xmin + xmax) / 2 - ox) / tile_size),
-                math.floor(((ymin + ymax) / 2 - oy) / tile_size))
+        cell = (
+            math.floor(((xmin + xmax) / 2 - ox) / tile_size),
+            math.floor(((ymin + ymax) / 2 - oy) / tile_size),
+        )
         tiles.append((laz.name, laz.stat().st_size, cell))
 
     threshold = (merge_below or 0) * 1e6
@@ -177,9 +204,13 @@ def plan_tile_groups(tile_tmp: Path, point_origin: str, tile_size: float, merge_
     sizes = {name: size for name, size, _ in tiles}
     for g in groups:
         if len(g) > 1:
-            log.info(f"Merging {len(g)} tiles into {Path(g[0]).stem}: {', '.join(g[1:])}")
+            log.info(
+                f"Merging {len(g)} tiles into {Path(g[0]).stem}: {', '.join(g[1:])}"
+            )
         if sum(sizes[n] for n in g) < threshold:
-            log.warning(f"Tile below mergeBelow but no adjacent neighbor, kept as-is: {g[0]}")
+            log.warning(
+                f"Tile below mergeBelow but no adjacent neighbor, kept as-is: {g[0]}"
+            )
     return [[tile_tmp / n for n in g] for g in groups]
 
 
@@ -193,18 +224,22 @@ def warn_stale(groups: list, outdir: Path):
     receivers = sorted({receiver[n] for n in stale if n in receiver})
     msg = f"Stale tiles from a previous run in {outdir}: {', '.join(stale)}."
     if receivers:
-        msg += (f" Their points now belong in: {', '.join(receivers)}."
-                " Delete the stale files AND those receivers, then re-run.")
+        msg += (
+            f" Their points now belong in: {', '.join(receivers)}."
+            " Delete the stale files AND those receivers, then re-run."
+        )
     log.warning(msg)
 
 
 def convert_groups(groups: list, tile_tmp: Path, odir: Path):
     """Tile groups -> COPC in odir. Singletons batch through one -lof call, merged
     groups get one -merged call each. Existing outputs skipped."""
-    singles = [g[0] for g in groups
-               if len(g) == 1 and not (odir / _copc_name(g[0])).exists()]
-    merged = [g for g in groups
-              if len(g) > 1 and not (odir / _copc_name(g[0])).exists()]
+    singles = [
+        g[0] for g in groups if len(g) == 1 and not (odir / _copc_name(g[0])).exists()
+    ]
+    merged = [
+        g for g in groups if len(g) > 1 and not (odir / _copc_name(g[0])).exists()
+    ]
     if not singles and not merged:
         log.info("All tiles already have COPC. Skipping conversion.")
         return
@@ -218,14 +253,17 @@ def convert_groups(groups: list, tile_tmp: Path, odir: Path):
         lof_path = tile_tmp / "_merge_list.txt"
         lof_path.write_text("\n".join(str(f) for f in g), encoding="utf-8")
         # same convention as convert_to_copc
-        subprocess.run([
-            str(_BIN / _COPCINDEX),
-            "-merged",
-            "-lof", str(lof_path),
-            "-o", str(out),
-            "-progress",
-        ],
-            check=False
+        subprocess.run(
+            [
+                str(_BIN / _COPCINDEX),
+                "-merged",
+                "-lof",
+                str(lof_path),
+                "-o",
+                str(out),
+                "-progress",
+            ],
+            check=False,
         )
         if not out.exists():
             raise RuntimeError(f"lascopcindex produced no merged output for {out.name}")
@@ -239,22 +277,24 @@ def convert_to_copc(laz_files: list, tile_tmp: Path, odir: Path):
     log.info(f"Converting {len(laz_files)} tile(s) to COPC...")
 
     lof_path = tile_tmp / "_convert_list.txt"
-    lof_path.write_text(
-        "\n".join(str(f) for f in laz_files),
-        encoding="utf-8"
-    )
+    lof_path.write_text("\n".join(str(f) for f in laz_files), encoding="utf-8")
 
     # lascopcindex exits nonzero on benign CRS warnings while still writing the COPC,
     # so success is judged by the outputs existing, not the exit code (like c_copc)
-    subprocess.run([
-        str(_BIN / _COPCINDEX),
-        "-lof", str(lof_path),
-        "-odir", str(odir),
-        "-progress",
-    ],
-        check=False
+    subprocess.run(
+        [
+            str(_BIN / _COPCINDEX),
+            "-lof",
+            str(lof_path),
+            "-odir",
+            str(odir),
+            "-progress",
+        ],
+        check=False,
     )
-    missing = [f.name for f in laz_files if not (odir / (f.stem + ".copc.laz")).exists()]
+    missing = [
+        f.name for f in laz_files if not (odir / (f.stem + ".copc.laz")).exists()
+    ]
     if missing:
         raise RuntimeError(f"lascopcindex produced no output for: {', '.join(missing)}")
 
@@ -280,58 +320,120 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent("""\
             Config precedence: CLI args > YAML config > built-in defaults.
             Use --init to generate a template config file.
-        """)
+        """),
     )
 
     tac = parser.add_argument_group("Tile and Convert options")
 
-    tac.add_argument("--config", type=str, default=None,
-                        help="Path to YAML configuration file")
-    tac.add_argument("--init", type=str, nargs="?", const="config.yaml", default=None, # "?" means 0 or 1 args
-                        metavar="FILENAME",
-                        help="Generate template config YAML and exit (default: config.yaml)")
-    tac.add_argument("--loglevel", type=str, choices=["warning", "info", "debug", "none"],
-                        default="info",
-                        help="Console log level, opals modules derive from it (default: info)")
+    tac.add_argument(
+        "--config", type=str, default=None, help="Path to YAML configuration file"
+    )
+    tac.add_argument(
+        "--init",
+        type=str,
+        nargs="?",
+        const="config.yaml",
+        default=None,  # "?" means 0 or 1 args
+        metavar="FILENAME",
+        help="Generate template config YAML and exit (default: config.yaml)",
+    )
+    tac.add_argument(
+        "--loglevel",
+        type=str,
+        choices=["warning", "info", "debug", "none"],
+        default="info",
+        help="Console log level, opals modules derive from it (default: info)",
+    )
 
-    tac.add_argument("--infile", type=str, nargs="+", default=None,
-                        help="Input LAZ file(s) and/or directories")
-    tac.add_argument("--outdir", type=str, default=None,
-                        help="Output directory for COPC tiles. Single input: exact dir. "
-                             "Multiple inputs: parent root, each input goes to <outdir>/<stem>_tiles. "
-                             "(default: <infile_stem>_tiles beside each input)")
+    tac.add_argument(
+        "--infile",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Input LAZ file(s) and/or directories",
+    )
+    tac.add_argument(
+        "--outdir",
+        type=str,
+        default=None,
+        help="Output directory for COPC tiles. Single input: exact dir. "
+        "Multiple inputs: parent root, each input goes to <outdir>/<stem>_tiles. "
+        "(default: <infile_stem>_tiles beside each input)",
+    )
 
-    tac.add_argument("--pointOrigin", type=str, default=None,
-                        help=f"Tile origin coordinates (default: {DEFAULTS['pointOrigin']})")
-    tac.add_argument("--tileSize", type=float, default=None,
-                        help=f"Tile size in map units (default: {DEFAULTS['tileSize']})")
-    tac.add_argument("--buffer", type=float, default=None,
-                        help="Buffer around tiles in map units; keep 0 when mergeBelow is active, "
-                             f"merged tiles would duplicate overlap points (default: {DEFAULTS['buffer']})")
-    tac.add_argument("--mergeBelow", type=float, default=None,
-                        help="Merge tiles smaller than this (MB) into an adjacent tile, "
-                             f"0 disables (default: {DEFAULTS['mergeBelow']})")
-    tac.add_argument("--tileSize_odm", type=float, default=None,
-                        help=f"Tile size for opalsImport (default: {DEFAULTS['tileSize_odm']})")
-    tac.add_argument("--keepodm", action=argparse.BooleanOptionalAction, default=None, # note to self: NO store_true
-                        help=f"Keep intermediate ODM files (default: {DEFAULTS['keepodm']})")
+    tac.add_argument(
+        "--pointOrigin",
+        type=str,
+        default=None,
+        help=f"Tile origin coordinates (default: {DEFAULTS['pointOrigin']})",
+    )
+    tac.add_argument(
+        "--tileSize",
+        type=float,
+        default=None,
+        help=f"Tile size in map units (default: {DEFAULTS['tileSize']})",
+    )
+    tac.add_argument(
+        "--buffer",
+        type=float,
+        default=None,
+        help="Buffer around tiles in map units; keep 0 when mergeBelow is active, "
+        f"merged tiles would duplicate overlap points (default: {DEFAULTS['buffer']})",
+    )
+    tac.add_argument(
+        "--mergeBelow",
+        type=float,
+        default=None,
+        help="Merge tiles smaller than this (MB) into an adjacent tile, "
+        f"0 disables (default: {DEFAULTS['mergeBelow']})",
+    )
+    tac.add_argument(
+        "--tileSize_odm",
+        type=float,
+        default=None,
+        help=f"Tile size for opalsImport (default: {DEFAULTS['tileSize_odm']})",
+    )
+    tac.add_argument(
+        "--keepodm",
+        action=argparse.BooleanOptionalAction,
+        default=None,  # note to self: NO store_true
+        help=f"Keep intermediate ODM files (default: {DEFAULTS['keepodm']})",
+    )
 
-    tac.add_argument("--nbThreads", type=int, default=None,
-                        help=f"Number of threads (default: {DEFAULTS['nbThreads']})")
-    tac.add_argument("--distribute", type=int, default=None,
-                        help=f"Distribution factor (default: {DEFAULTS['distribute']})")
-    tac.add_argument("--tmp_path", type=str, default=None,
-                        help=f"Temporary directory path (default: {DEFAULTS['tmp_path']})")
-    tac.add_argument("--keeptmp", action=argparse.BooleanOptionalAction, default=None,
-                        help=f"Keep temporary files (default: {DEFAULTS['keeptmp']})")
+    tac.add_argument(
+        "--nbThreads",
+        type=int,
+        default=None,
+        help=f"Number of threads (default: {DEFAULTS['nbThreads']})",
+    )
+    tac.add_argument(
+        "--distribute",
+        type=int,
+        default=None,
+        help=f"Distribution factor (default: {DEFAULTS['distribute']})",
+    )
+    tac.add_argument(
+        "--tmp_path",
+        type=str,
+        default=None,
+        help=f"Temporary directory path (default: {DEFAULTS['tmp_path']})",
+    )
+    tac.add_argument(
+        "--keeptmp",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=f"Keep temporary files (default: {DEFAULTS['keeptmp']})",
+    )
 
     return parser
 
 
-def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Path | str) -> Path:
+def process_one(
+    infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Path | str
+) -> Path:
     """Full tile+convert pipeline for one input. Returns the produced ODM path."""
     infile, outdir, tmp_root = Path(infile), Path(outdir), Path(tmp_root)
-    work = tmp_root / infile.stem          # per-input work dir isolates odm, grid and tiles
+    work = tmp_root / infile.stem  # per-input work dir isolates odm, grid and tiles
     tile_tmp = work / "tiles"
     outdir.mkdir(parents=True, exist_ok=True)
     tile_tmp.mkdir(parents=True, exist_ok=True)
@@ -352,13 +454,25 @@ def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Pat
         # infer pointorigin from bbox if not provided
         # shift by half LAS resolution so quantized coords never sit exactly on tile edges (dupes)
         box = header.getLimit()
-        origin = cfg["pointOrigin"] if cfg["pointOrigin"] else f"{box.xmin - 0.0005};{box.ymin - 0.0005}"
+        origin = (
+            cfg["pointOrigin"]
+            if cfg["pointOrigin"]
+            else f"{box.xmin - 0.0005};{box.ymin - 0.0005}"
+        )
         pretile(header, work, cfg["nbThreads"], origin, cfg["tileSize"])
 
         # LAZ tiles go to tile_tmp, not outdir
         log.info("Cutting tiles...")
         ofd = export_ofd(infile, work)
-        precut(infile, cfg["buffer"], tile_tmp, cfg["nbThreads"], cfg["distribute"], work, ofd)
+        precut(
+            infile,
+            cfg["buffer"],
+            tile_tmp,
+            cfg["nbThreads"],
+            cfg["distribute"],
+            work,
+            ofd,
+        )
     finally:
         os.chdir(str(original_cwd))
 
@@ -372,6 +486,7 @@ def process_one(infile: Path | str, cfg: dict, outdir: Path | str, tmp_root: Pat
 def main():
     namespace = "tile_and_convert_pcl"
     from ..core import config
+
     config.register_defaults(namespace, DEFAULTS)
 
     parser = build_parser()
@@ -406,13 +521,13 @@ def main():
     explicit_outdir = Path(cfg["outdir"]).resolve() if cfg["outdir"] else None
 
     def outdir_for(infile: Path) -> Path:
-        if explicit_outdir is None:                 # default: beside each input
+        if explicit_outdir is None:  # default: beside each input
             return Path(str(infile.with_suffix("")) + "_tiles")
-        if len(inputs) == 1:                        # single input: exact dir
+        if len(inputs) == 1:  # single input: exact dir
             return explicit_outdir
         return explicit_outdir / (infile.stem + "_tiles")  # multi: parent root
 
-    results = []          # (name, "ok" | error message)
+    results = []  # (name, "ok" | error message)
     produced_odms = []
 
     log.debug(f'nbThreads={cfg["nbThreads"]}\t distribute={cfg["distribute"]}')
@@ -447,6 +562,7 @@ def main():
         log.error(f"  {name}: {msg}")
     if failed:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -16,16 +16,18 @@ HS_EDGE = 1024  # render hillshade at this res, then downscale to MAX_EDGE
 @dataclass(frozen=True)
 class ItemThumbJob:
     """One item thumbnail, queued during the campaign loop, rendered after normalize_hrefs."""
-    item: object       # pystac.Item
+
+    item: object  # pystac.Item
     src_path: Path
-    kind: str          # rgb | hillshade | pointcloud
+    kind: str  # rgb | hillshade | pointcloud
 
 
 @dataclass(frozen=True)
 class CollThumbJob:
     """One aggregate subcollection thumbnail. changed = re-render, else only re-attach."""
-    coll: object       # pystac.Collection
-    src_paths: list    # list[Path], the flagged tiles
+
+    coll: object  # pystac.Collection
+    src_paths: list  # list[Path], the flagged tiles
     changed: bool
 
 
@@ -34,6 +36,7 @@ def _data_window(band, sw: int, sh: int) -> list[int]:
     item footprint/bbox instead of the full grid (nodata margins). Full grid when the
     band is all-valid or the mask is unusable."""
     import numpy as np
+
     if band.GetMaskFlags() == gdal.GMF_ALL_VALID:
         return [0, 0, sw, sh]
     scale = max(1.0, max(sw, sh) / MAX_EDGE)
@@ -59,8 +62,11 @@ def _thumb_srs(item, file_srs):
     returns:
       str | none ; None makes caller skip the warp"""
     props = getattr(item, "properties", None) or {}
-    return props.get("proj:wkt2") or props.get("proj:code") or (
-        file_srs.ExportToWkt() if file_srs is not None else None)
+    return (
+        props.get("proj:wkt2")
+        or props.get("proj:code")
+        or (file_srs.ExportToWkt() if file_srs is not None else None)
+    )
 
 
 def _fit(cw: int, ch: int, edge: int) -> tuple[int, int]:
@@ -73,7 +79,9 @@ def _write_png(ds, out: Path) -> None:
     """Writes a dataset to PNG, capping the longest edge at MAX_EDGE"""
     w, h = _fit(ds.RasterXSize, ds.RasterYSize, MAX_EDGE)
     if (w, h) != (ds.RasterXSize, ds.RasterYSize):
-        ds = gdal.Translate("", ds, format="MEM", resampleAlg="average", width=w, height=h)
+        ds = gdal.Translate(
+            "", ds, format="MEM", resampleAlg="average", width=w, height=h
+        )
     gdal.Translate(str(out), ds, format="PNG")
 
 
@@ -87,16 +95,23 @@ def render_thumbnail(item, src_path, kind: str) -> str:
     Source CRS comes from the item's proj metadata (the file may carry none)."""
     src = str(src_path)
     out = Path(item.get_self_href()).parent / f"{item.id}_thumbnail.png"
-    out.parent.mkdir(parents=True, exist_ok=True)  # save() has not created the item dir yet
+    out.parent.mkdir(
+        parents=True, exist_ok=True
+    )  # save() has not created the item dir yet
 
     if kind == "pointcloud":
-        return _render_pcl(src, out) 
+        return _render_pcl(src, out)
 
     ds = gdal.Open(src)
     sw, sh, nbands = ds.RasterXSize, ds.RasterYSize, ds.RasterCount
-    has_alpha = nbands >= 4 and ds.GetRasterBand(4).GetColorInterpretation() == gdal.GCI_AlphaBand
+    has_alpha = (
+        nbands >= 4
+        and ds.GetRasterBand(4).GetColorInterpretation() == gdal.GCI_AlphaBand
+    )
     file_srs = ds.GetSpatialRef()  # usually None
-    win = _data_window(ds.GetRasterBand(1), sw, sh)  # crop nodata margin so thumb matches bbox
+    win = _data_window(
+        ds.GetRasterBand(1), sw, sh
+    )  # crop nodata margin so thumb matches bbox
     ds = None
     cw, ch = win[2], win[3]
     if kind == "hillshade":
@@ -104,20 +119,34 @@ def render_thumbnail(item, src_path, kind: str) -> str:
         w, h = _fit(cw, ch, HS_EDGE)
         small = gdal.Translate("", src, format="MEM", width=w, height=h, srcWin=win)
         # zFactor=1 default, can adjust later
-        rendered = gdal.DEMProcessing("", small, "hillshade", format="MEM",
-                                      computeEdges=True)  # 1-band, nodata=0
+        rendered = gdal.DEMProcessing(
+            "", small, "hillshade", format="MEM", computeEdges=True
+        )  # 1-band, nodata=0
     else:
         # RGBA when the source carries an alpha band, keeps nodata edges transparent
         w, h = _fit(cw, ch, MAX_EDGE)
         bands = [1, 2, 3, 4] if has_alpha else ([1, 2, 3] if nbands >= 3 else [1])
-        rendered = gdal.Translate("", src, format="MEM", width=w, height=h,
-                                  bandList=bands, resampleAlg="average", srcWin=win)
+        rendered = gdal.Translate(
+            "",
+            src,
+            format="MEM",
+            width=w,
+            height=h,
+            bandList=bands,
+            resampleAlg="average",
+            srcWin=win,
+        )
 
     srs_in = _thumb_srs(item, file_srs)
     if srs_in and item.bbox:
         # warp to plate-carree and pin the extent to item.bbox
-        warp = {"srcSRS": srs_in, "dstSRS": "EPSG:4326", "resampleAlg": "bilinear",
-                "outputBounds": item.bbox, "outputBoundsSRS": "EPSG:4326"}
+        warp = {
+            "srcSRS": srs_in,
+            "dstSRS": "EPSG:4326",
+            "resampleAlg": "bilinear",
+            "outputBounds": item.bbox,
+            "outputBoundsSRS": "EPSG:4326",
+        }
         if not has_alpha:
             warp["dstAlpha"] = True
         rendered = gdal.Warp("", rendered, format="MEM", **warp)
@@ -134,12 +163,13 @@ COARSE_N = int(4e5)  # decimation target for plain (non-COPC) laz/las
 def _coarse_xyz(src: str, resolution: float | None = None):
     """(x, y, z) arrays, coarsely sampled.
     COPC reads shallow octree levels; plain LAZ/LAS itterates chunks (full read)
-    
+
     returns:
       tuple of ndarrays (x,y,z)
     """
     import laspy
     import numpy as np
+
     if src.endswith(".copc.laz"):
         with laspy.CopcReader.open(src) as r:
             if resolution is None:
@@ -149,7 +179,9 @@ def _coarse_xyz(src: str, resolution: float | None = None):
             pts = r.query(resolution=resolution)
         return np.asarray(pts.x), np.asarray(pts.y), np.asarray(pts.z)
     # selection is ignored for LAS < 1.4 / point format < 6.
-    sel = laspy.DecompressionSelection.base().decompress_z() # base is xy only so explicit z
+    sel = (
+        laspy.DecompressionSelection.base().decompress_z()
+    )  # base is xy only so explicit z
     with laspy.open(src, decompression_selection=sel) as f:
         step = max(1, f.header.point_count // COARSE_N)
         xs, ys, zs = [], [], []
@@ -180,7 +212,9 @@ def _bin_and_save(x, y, z, out: Path, extent=None) -> str:
         w, h = MAX_EDGE, (max(1, round(MAX_EDGE * ey / ex)) if ex else 1)
     else:
         w, h = (max(1, round(MAX_EDGE * ex / ey)) if ey else 1), MAX_EDGE
-    grid, *_ = binned_statistic_2d(x, y, z, statistic="max", bins=[w, h], range=rng)  # nan = empty
+    grid, *_ = binned_statistic_2d(
+        x, y, z, statistic="max", bins=[w, h], range=rng
+    )  # nan = empty
     # nearest-fill small holes, keep real voids transparent
     nan = np.isnan(grid)
     dist, (ix, iy) = ndimage.distance_transform_edt(nan, return_indices=True)
@@ -218,7 +252,9 @@ def render_collection_thumbnail(coll, src_paths) -> str:
                 maxs.append(f.header.maxs)
                 srcs.append((s, f.header.point_count))
         except Exception as e:
-            log.warning(f"header unreadable, tile dropped from {coll.id} thumbnail: {Path(s).name} ({e})")
+            log.warning(
+                f"header unreadable, tile dropped from {coll.id} thumbnail: {Path(s).name} ({e})"
+            )
     if not srcs:
         raise ValueError("no readable source")
     lo, hi = np.min(mins, axis=0), np.max(maxs, axis=0)
@@ -230,34 +266,43 @@ def render_collection_thumbnail(coll, src_paths) -> str:
         if not s.endswith(".copc.laz"):
             # no COPC octree to query shallowly, and a chunk seek lands on one flight-line
             # segment rather than a spread sample: the whole file gets read
-            log.warning(f"no COPC index, full {npts}-point read for {coll.id} thumbnail: {Path(s).name}")
+            log.warning(
+                f"no COPC index, full {npts}-point read for {coll.id} thumbnail: {Path(s).name}"
+            )
         try:
             x, y, z = _coarse_xyz(s, resolution=res)
         except Exception as e:
-            log.warning(f"read failed, tile dropped from {coll.id} thumbnail: {Path(s).name} ({e})")
+            log.warning(
+                f"read failed, tile dropped from {coll.id} thumbnail: {Path(s).name} ({e})"
+            )
             continue
         xs.append(x)
         ys.append(y)
         zs.append(z)
     if not xs:
         raise ValueError("every source failed to read")
-    return _bin_and_save(np.concatenate(xs), np.concatenate(ys), np.concatenate(zs),
-                         out, extent=extent)
+    return _bin_and_save(
+        np.concatenate(xs), np.concatenate(ys), np.concatenate(zs), out, extent=extent
+    )
 
 
 if __name__ == "__main__":
     # self-check: python -m turnstac.catalog.thumbnail <src> [<src> ...] [<dest dir>]
     # several sources render one aggregate collection thumbnail instead
     import sys
-    from types import SimpleNamespace
     import time
+    from types import SimpleNamespace
 
     args = [Path(a).resolve() for a in sys.argv[1:]]
     dst = args.pop() if len(args) > 1 and args[-1].is_dir() else Path.cwd()
     if len(args) > 1:
-        coll = SimpleNamespace(id=dst.name, get_self_href=lambda: str(dst / "collection.json"))
+        coll = SimpleNamespace(
+            id=dst.name, get_self_href=lambda: str(dst / "collection.json")
+        )
         start = time.time()
-        print(render_collection_thumbnail(coll, args), f" ({round(time.time()-start,1)}s)")
+        print(
+            render_collection_thumbnail(coll, args), f" ({round(time.time()-start,1)}s)"
+        )
         sys.exit()
     src = args[0]
     if src.name.endswith((".las", ".laz")):
@@ -267,10 +312,17 @@ if __name__ == "__main__":
         kind = "rgb" if ds.RasterCount >= 3 else "hillshade"
         sw, sh = ds.RasterXSize, ds.RasterYSize
         xoff, yoff, xs, ys = _data_window(ds.GetRasterBand(1), sw, sh)
-        assert 0 <= xoff and 0 <= yoff and xs > 0 and ys > 0 \
-            and xoff + xs <= sw and yoff + ys <= sh, (xoff, yoff, xs, ys, sw, sh)
+        assert (
+            0 <= xoff
+            and 0 <= yoff
+            and xs > 0
+            and ys > 0
+            and xoff + xs <= sw
+            and yoff + ys <= sh
+        ), (xoff, yoff, xs, ys, sw, sh)
         ds = None
-    item = SimpleNamespace(id=src.stem.removesuffix(".copc"),
-                           get_self_href=lambda: str(dst / "item.json"))
+    item = SimpleNamespace(
+        id=src.stem.removesuffix(".copc"), get_self_href=lambda: str(dst / "item.json")
+    )
     start = time.time()
     print(render_thumbnail(item, src, kind), f" ({round(time.time()-start,1)}s)")

@@ -27,63 +27,145 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     cat = parser.add_argument_group("Catalog options")
-    cat.add_argument("root", type=str, nargs="?", default=None,
-                     help="Processed-datasets root holding the campaign folders (positional)")
+    cat.add_argument(
+        "root",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Processed-datasets root holding the campaign folders (positional)",
+    )
 
-    cat.add_argument("--config", type=str, default=None,
-                     help="Path to YAML configuration file")
-    cat.add_argument("--init", type=str, nargs="?", const="config.yaml", default=None,
-                     metavar="FILENAME",
-                     help="Generate template config YAML and exit (default: config.yaml)")
-    cat.add_argument("--loglevel", type=str, choices=["warning", "info", "debug", "none"],
-                     default="info",
-                     help="Console log level, opals modules derive from it (default: info)")
-    cat.add_argument("--out", type=str, default=None,
-                     help="Catalog output directory (default: <root>/catalog)")
-    cat.add_argument("--only", type=str, default=None,
-                     help="Process only campaign dirs matching this glob; skips the stale-collection sweep")
-    cat.add_argument("--force", action=argparse.BooleanOptionalAction, default=None,
-                     help="Skip the idempotency gate, rebuild every item (use after registry/code "
-                          "changes, or to repair a dangling href from a hand-deleted thumbnail/sidecar)"
-                          "strongly recommended to use in conjuntcure with --only")
-    cat.add_argument("--assetHrefs", type=str, choices=["relative", "absolute"], default=None,
-                     help="Asset href style: relative (self-contained) or absolute (keep build-time paths); "
-                          "thumbnails are always relative (default: absolute)")
-    cat.add_argument("--minPoints", type=int, default=None,
-                     help="Drop point-cloud items below this pc:count, degenerate tiles (default: 1000)")
-    cat.add_argument("--thumbnails", action=argparse.BooleanOptionalAction, default=None,
-                     help="Render PNG thumbnails for raster items according to registry (default: on)")
+    cat.add_argument(
+        "--config", type=str, default=None, help="Path to YAML configuration file"
+    )
+    cat.add_argument(
+        "--init",
+        type=str,
+        nargs="?",
+        const="config.yaml",
+        default=None,
+        metavar="FILENAME",
+        help="Generate template config YAML and exit (default: config.yaml)",
+    )
+    cat.add_argument(
+        "--loglevel",
+        type=str,
+        choices=["warning", "info", "debug", "none"],
+        default="info",
+        help="Console log level, opals modules derive from it (default: info)",
+    )
+    cat.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="Catalog output directory (default: <root>/catalog)",
+    )
+    cat.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help="Process only campaign dirs matching this glob; skips the stale-collection sweep",
+    )
+    cat.add_argument(
+        "--force",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Skip the idempotency gate, rebuild every item (use after registry/code "
+        "changes, or to repair a dangling href from a hand-deleted thumbnail/sidecar)"
+        "strongly recommended to use in conjuntcure with --only",
+    )
+    cat.add_argument(
+        "--assetHrefs",
+        type=str,
+        choices=["relative", "absolute"],
+        default=None,
+        help="Asset href style: relative (self-contained) or absolute (keep build-time paths); "
+        "thumbnails are always relative (default: absolute)",
+    )
+    cat.add_argument(
+        "--minPoints",
+        type=int,
+        default=None,
+        help="Drop point-cloud items below this pc:count, degenerate tiles (default: 1000)",
+    )
+    cat.add_argument(
+        "--thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Render PNG thumbnails for raster items according to registry (default: on)",
+    )
 
     pol = parser.add_argument_group("Policy options")
 
-    pol.add_argument("--stale", type=str, choices=["warn", "remove", "raise"], default=None,
-                     help="Items/collections whose file/dir vanished from disk: keep with warning, remove, or abort (default: warn)")
-    pol.add_argument("--unknownAssets", type=str, choices=["warn", "skip", "raise"], default=None,
-                     help="Files matching no registry pattern (default: warn)")
-    pol.add_argument("--nonCloudNative", type=str, choices=["warn", "skip", "raise"], default=None,
-                     help="Files without a cloud-native twin: catalog with warning, drop, or abort (default: warn)")
-    pol.add_argument("--invalidCog", type=str, choices=["warn", "demote", "raise"], default=None,
-                     help="Rasters failing the COG structure validator: keep cloud-native with a "
-                          "warning, demote to plain GeoTIFF, or abort (default: demote)")
-    pol.add_argument("--idCollisions", type=str, choices=["warn", "raise"], default=None,
-                     help="Duplicate item/subcollection ids across campaigns: warn and keep the first "
-                          "owner, or fail the campaign. Collection ids and collisions inside one "
-                          "campaign always fail (default: warn)")
+    pol.add_argument(
+        "--stale",
+        type=str,
+        choices=["warn", "remove", "raise"],
+        default=None,
+        help="Items/collections whose file/dir vanished from disk: keep with warning, remove, or abort (default: warn)",
+    )
+    pol.add_argument(
+        "--unknownAssets",
+        type=str,
+        choices=["warn", "skip", "raise"],
+        default=None,
+        help="Files matching no registry pattern (default: warn)",
+    )
+    pol.add_argument(
+        "--nonCloudNative",
+        type=str,
+        choices=["warn", "skip", "raise"],
+        default=None,
+        help="Files without a cloud-native twin: catalog with warning, drop, or abort (default: warn)",
+    )
+    pol.add_argument(
+        "--invalidCog",
+        type=str,
+        choices=["warn", "demote", "raise"],
+        default=None,
+        help="Rasters failing the COG structure validator: keep cloud-native with a "
+        "warning, demote to plain GeoTIFF, or abort (default: demote)",
+    )
+    pol.add_argument(
+        "--idCollisions",
+        type=str,
+        choices=["warn", "raise"],
+        default=None,
+        help="Duplicate item/subcollection ids across campaigns: warn and keep the first "
+        "owner, or fail the campaign. Collection ids and collisions inside one "
+        "campaign always fail (default: warn)",
+    )
 
     deb = parser.add_argument_group("Debug options")
 
-    deb.add_argument("--dryRun", action=argparse.BooleanOptionalAction, default=None,
-                     help="Discover + gate only, report counts, write nothing")
-    deb.add_argument("--validate", action=argparse.BooleanOptionalAction, default=None,
-                     help="STAC-validate the catalog after saving (needs pystac[validation])")
+    deb.add_argument(
+        "--dryRun",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Discover + gate only, report counts, write nothing",
+    )
+    deb.add_argument(
+        "--validate",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="STAC-validate the catalog after saving (needs pystac[validation])",
+    )
 
     inf = parser.add_argument_group("OpalsInfo options")
 
-    inf.add_argument("--nbThreads", type=int, default=None,
-                     help="Thread count for opals modules (default: opals default, all CPUs)")
-    inf.add_argument("--exactComputation", action=argparse.BooleanOptionalAction, default=None,
-                     help="Exact point statistics via full scan; --no-exactComputation reads headers only: "
-                          "no pc:statistics, item datetime falls back to campaign date (default: on)")
+    inf.add_argument(
+        "--nbThreads",
+        type=int,
+        default=None,
+        help="Thread count for opals modules (default: opals default, all CPUs)",
+    )
+    inf.add_argument(
+        "--exactComputation",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Exact point statistics via full scan; --no-exactComputation reads headers only: "
+        "no pc:statistics, item datetime falls back to campaign date (default: on)",
+    )
 
     return parser
 
@@ -124,12 +206,16 @@ def main():
     # Summary
     failed_items = 0
     for name, c in ok.items():
-        log.info(f"  {name}: {c['rebuilt']} rebuilt, {c['refreshed']} refreshed, "
-                 f"{c['reused']} reused, {c['stale']} stale, {c['failed']} failed")
+        log.info(
+            f"  {name}: {c['rebuilt']} rebuilt, {c['refreshed']} refreshed, "
+            f"{c['reused']} reused, {c['stale']} stale, {c['failed']} failed"
+        )
         failed_items += c["failed"]
     if res["stale_collections"]:
         log.info(f"  stale collections: {', '.join(res['stale_collections'])}")
-    log.info(f"Done. {len(ok)} ok, {len(failed)} failed, {failed_items} failed item(s).")
+    log.info(
+        f"Done. {len(ok)} ok, {len(failed)} failed, {failed_items} failed item(s)."
+    )
     for name, msg in failed.items():
         log.error(f"  {name}: {msg}")
     if failed or failed_items or res["validation"] not in (None, "ok"):

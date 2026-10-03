@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
-from ..core.registry import STEM_PATTERNS, LABELS, SIDECAR_EXTENSIONS
+from ..core.registry import LABELS, SIDECAR_EXTENSIONS, STEM_PATTERNS
 from .policy import RunPolicy
+
 log = logging.getLogger(__name__)
 
 
@@ -23,12 +24,14 @@ def _gdal():
     """(gdal, COG validator or None), imported on the first raster probe. Kept out of
     module scope so importing turnstac.catalog does not require GDAL."""
     from osgeo import gdal
+
     gdal.UseExceptions()
     try:  # optional, (pip install gdal-utils on GDAL < 3.2)
         from osgeo_utils.samples.validate_cloud_optimized_geotiff import validate
     except ImportError:
         validate = None
     return gdal, validate
+
 
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
@@ -38,27 +41,34 @@ class Asset:
     path: Path
     label: str
     category: str
-    kind: str          # pcl | raster, picks the extract.readers entry
+    kind: str  # pcl | raster, picks the extract.readers entry
     stac_roles: list
     media_type: str
-    extensions: list   # which build.py populators run
+    extensions: list  # which build.py populators run
     cloud_native: bool
     thumbnail: str | None = None  # registry renderer kind: rgb | hillshade | pointcloud
     sidecars: list = field(default_factory=list)  # Paths matched by full basename
-    file_meta: object = None  # extract.FileMeta, attached by manager's gate when it hashed
+    file_meta: object = (
+        None  # extract.FileMeta, attached by manager's gate when it hashed
+    )
 
 
 @dataclass
 class Product:
-    id: str            # one future Item
+    id: str  # one future Item
     category: str
     kind: str
-    assets: list[Asset]       # always length 1 today; a list for the Item builder
-    group: str | None = None  # tile-group name -> subcollection; None -> flat in the campaign
-    item: object = None       # pystac.Item, attached by manager (build/reuse); untyped so discover stays pystac-free
+    assets: list[Asset]  # always length 1 today; a list for the Item builder
+    group: str | None = (
+        None  # tile-group name -> subcollection; None -> flat in the campaign
+    )
+    item: object = (
+        None  # pystac.Item, attached by manager (build/reuse); untyped so discover stays pystac-free
+    )
 
 
 # --- matching ---
+
 
 def _match_ext(low_name: str, exts) -> str | None:
     """Longest of a pattern's extensions that low_name ends with, else None."""
@@ -96,7 +106,10 @@ def match(filename, stem_patterns=STEM_PATTERNS) -> str | None:
 
 # --- cloud-native probe ---
 
-def _probe_cloud_native(path: Path, kind: str, ext: str, invalid_cog: str = "demote") -> bool:
+
+def _probe_cloud_native(
+    path: Path, kind: str, ext: str, invalid_cog: str = "demote"
+) -> bool:
     """Checks if a file is cloud native
 
     Pointcloud: ext == .copc.laz.
@@ -130,6 +143,7 @@ def _probe_cloud_native(path: Path, kind: str, ext: str, invalid_cog: str = "dem
 
 # --- ids / twins / tile groups ---
 
+
 def _item_id(name: str, ext: str) -> str:
     """Deterministic id: filename tokens minus the cog marker, original order/case, so an
     item keeps its id when a plain raster is later converted to COG."""
@@ -139,7 +153,8 @@ def _item_id(name: str, ext: str) -> str:
 
 def _twin_key(m: "_Match"):
     """Twins are the files that would produce the same item id: only the cog/copc marker differs
-    Keyed on the id itself, so two names whose tokens are a permutation of each other stay separate."""
+    Keyed on the id itself, so two names whose tokens are a permutation of each other stay separate.
+    """
     return (m.path.parent, m.category, _item_id(m.path.name, m.ext).lower())
 
 
@@ -171,7 +186,7 @@ def _resolve_twins(matches: list["_Match"], policy: str) -> list["_Match"]:
     args:
       matches   - as built in discover()
       policy    - warn | skip | raise ; for non-cn winners
-    
+
     returns:
       list of kept matches
     """
@@ -184,7 +199,10 @@ def _resolve_twins(matches: list["_Match"], policy: str) -> list["_Match"]:
         if len(non_copc) > 1:
             names = ", ".join(sorted(m.path.name for m in members))
             log.warning(f"extension mix in twins ({names}), keeping preferred format")
-        winner = max(members, key=lambda m: (m.cloud_native, _cog_named(m), _EXT_RANK.get(m.ext, 0)))
+        winner = max(
+            members,
+            key=lambda m: (m.cloud_native, _cog_named(m), _EXT_RANK.get(m.ext, 0)),
+        )
         for m in members:
             if m is not winner:
                 log.debug(f"superseded by twin {winner.path.name}: {m.path.name}")
@@ -218,6 +236,7 @@ def _assign_tile_groups(products: list, root: Path) -> None:
 
 # --- discovery ---
 
+
 @dataclass
 class _Match:
     path: Path
@@ -248,9 +267,15 @@ def _handle_unknown(path: Path, reason: str, policy: str) -> None:
     # skip: silent
 
 
-def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
-             stem_patterns=None, labels=None, id_prefix: str | None = None,
-             exclude: list[str] | None = None) -> list:
+def discover(
+    folder: str | Path,
+    policy: RunPolicy = RunPolicy(),
+    *,
+    stem_patterns=None,
+    labels=None,
+    id_prefix: str | None = None,
+    exclude: list[str] | None = None,
+) -> list:
     """Products under a campaign folder: walk, apply policies, assign .group (pcl tiles).
     Pass merge_overrides() output for per-campaign overrides.
 
@@ -271,7 +296,11 @@ def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
     files = _walk(folder)
     sidecars = [f for f in files if _sidecar_ext(f.name)]
     # campaign.yaml is the per-campaign sidecar, never an asset
-    candidates = [f for f in files if not _sidecar_ext(f.name) and f.name.lower() != "campaign.yaml"]
+    candidates = [
+        f
+        for f in files
+        if not _sidecar_ext(f.name) and f.name.lower() != "campaign.yaml"
+    ]
 
     if exclude:
         kept = []
@@ -306,7 +335,9 @@ def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
     for m in sorted(matches, key=lambda m: m.path.name):
         item_id = qualify_id(_item_id(m.path.name, m.ext), id_prefix)
         if item_id in seen_ids:
-            raise ValueError(f"id collision: {item_id!r} from {seen_ids[item_id]} and {m.path.name}")
+            raise ValueError(
+                f"id collision: {item_id!r} from {seen_ids[item_id]} and {m.path.name}"
+            )
         seen_ids[item_id] = m.path.name
 
         is_cog = m.info["kind"] == "raster" and m.cloud_native
@@ -324,15 +355,20 @@ def discover(folder: str | Path, policy: RunPolicy = RunPolicy(), *,
         # same dir + stem form (x.prj) or full-name form (x.tif.aux.xml)
         base = m.path.name[: -len(m.ext)]
         asset.sidecars = [
-            sc for sc in sidecars
+            sc
+            for sc in sidecars
             if sc.parent == m.path.parent
             and sc.name[: -len(_sidecar_ext(sc.name) or "")] in (base, m.path.name)
         ]
-        products.append(Product(id=item_id, category=m.category, kind=m.info["kind"], assets=[asset]))
+        products.append(
+            Product(
+                id=item_id, category=m.category, kind=m.info["kind"], assets=[asset]
+            )
+        )
 
     _assign_tile_groups(products, folder)
     log.debug(f"{len(files)} files -> {len(products)} products in {folder}")
-    
+
     return products
 
 

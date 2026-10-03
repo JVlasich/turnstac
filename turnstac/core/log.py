@@ -34,10 +34,12 @@ class _ColorFormatter(logging.Formatter):
 def setup(level: str = "info") -> None:
     """Configure the root logger for console output (stderr)."""
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(_ColorFormatter(
-        "%(asctime)s %(levelname)-8s %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    ))
+    handler.setFormatter(
+        _ColorFormatter(
+            "%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
     logging.basicConfig(
         level=LEVELS[level],
         handlers=[handler],

@@ -20,7 +20,7 @@ from osgeo import gdal
 
 from ..core import config
 from ..core.log import setup
-from .common import resolve_inputs, beep
+from .common import beep, resolve_inputs
 
 gdal.UseExceptions()
 
@@ -29,8 +29,8 @@ log = logging.getLogger(__name__)
 DEFAULTS = {
     "infile": None,
     "outdir": None,
-    "minTileSize": None,   # GB on disk; None = COG-only for all inputs
-    "tileSize": 16384,     # pixels, tiling path only
+    "minTileSize": None,  # GB on disk; None = COG-only for all inputs
+    "tileSize": 16384,  # pixels, tiling path only
     "skipIfExists": True,
     "compress": "DEFLATE",
     "blockSize": 512,
@@ -56,7 +56,8 @@ def convert_to_cog(infile: Path, out_path: Path, cfg: dict) -> bool:
         log.info(f"COG exists, skipping: {out_path.name}")
         return False
     gdal.Translate(
-        str(out_path), str(infile),
+        str(out_path),
+        str(infile),
         format="COG",
         creationOptions=cog_creation_options(cfg),
     )
@@ -83,7 +84,7 @@ def tile_to_cog(infile: Path, tiles_dir: Path, cfg: dict) -> tuple:
             ysize = min(tile_size, height - yoff)
 
             out_path = tiles_dir / f"{infile.stem}_{xoff}_{yoff}.tif"
-            
+
             # empty tiles are never written, so the mask is re-read every run to recheck them
             # possible fix: write a .empty marker for the skipped-empty tiles
             if cfg["skipIfExists"] and out_path.exists():
@@ -98,7 +99,8 @@ def tile_to_cog(infile: Path, tiles_dir: Path, cfg: dict) -> tuple:
                 continue  # entirely nodata / transparent, dont write
 
             gdal.Translate(
-                str(out_path), ds,
+                str(out_path),
+                ds,
                 srcWin=[xoff, yoff, xsize, ysize],
                 format="COG",
                 creationOptions=creation_options,
@@ -117,45 +119,97 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent("""\
             Config precedence: CLI args > YAML config > built-in defaults.
             Use --init to generate a template config file.
-        """)
+        """),
     )
 
     tac = parser.add_argument_group("Convert and tile options")
 
-    tac.add_argument("--config", type=str, default=None,
-                        help="Path to YAML configuration file")
-    tac.add_argument("--init", type=str, nargs="?", const="config.yaml", default=None,
-                        metavar="FILENAME",
-                        help="Generate template config YAML and exit (default: config.yaml)")
-    tac.add_argument("--loglevel", type=str, choices=["warning", "info", "debug", "none"],
-                        default="info",
-                        help="Console log level (default: info)")
+    tac.add_argument(
+        "--config", type=str, default=None, help="Path to YAML configuration file"
+    )
+    tac.add_argument(
+        "--init",
+        type=str,
+        nargs="?",
+        const="config.yaml",
+        default=None,
+        metavar="FILENAME",
+        help="Generate template config YAML and exit (default: config.yaml)",
+    )
+    tac.add_argument(
+        "--loglevel",
+        type=str,
+        choices=["warning", "info", "debug", "none"],
+        default="info",
+        help="Console log level (default: info)",
+    )
 
-    tac.add_argument("--infile", type=str, nargs="+", default=None,
-                        help="Input GeoTIFF file(s) and/or directories")
-    tac.add_argument("--outdir", type=str, default=None,
-                        help="Output directory. COG-only inputs: file placed inside. "
-                             "Single tiled input: exact dir. "
-                             "Multiple inputs: parent root (<outdir>/<stem>_tiles or <stem>_cog.tif). "
-                             "(default: beside each input)")
+    tac.add_argument(
+        "--infile",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Input GeoTIFF file(s) and/or directories",
+    )
+    tac.add_argument(
+        "--outdir",
+        type=str,
+        default=None,
+        help="Output directory. COG-only inputs: file placed inside. "
+        "Single tiled input: exact dir. "
+        "Multiple inputs: parent root (<outdir>/<stem>_tiles or <stem>_cog.tif). "
+        "(default: beside each input)",
+    )
 
-    tac.add_argument("--minTileSize", type=float, default=None,
-                        help=f"Min file size in GB to trigger tiling. None = COG-only for all (default: {DEFAULTS['minTileSize']})")
-    tac.add_argument("--tileSize", type=int, default=None,
-                        help=f"Tile size in pixels (default: {DEFAULTS['tileSize']})")
-    tac.add_argument("--skipIfExists", action=argparse.BooleanOptionalAction, default=None,
-                        help=f"Skip outputs that already exist (default: {DEFAULTS['skipIfExists']})")
+    tac.add_argument(
+        "--minTileSize",
+        type=float,
+        default=None,
+        help=f"Min file size in GB to trigger tiling. None = COG-only for all (default: {DEFAULTS['minTileSize']})",
+    )
+    tac.add_argument(
+        "--tileSize",
+        type=int,
+        default=None,
+        help=f"Tile size in pixels (default: {DEFAULTS['tileSize']})",
+    )
+    tac.add_argument(
+        "--skipIfExists",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=f"Skip outputs that already exist (default: {DEFAULTS['skipIfExists']})",
+    )
 
-    tac.add_argument("--compress", type=str, default=None,
-                        help=f"COG compression (default: {DEFAULTS['compress']})")
-    tac.add_argument("--blockSize", type=int, default=None,
-                        help=f"COG block size in pixels (default: {DEFAULTS['blockSize']})")
-    tac.add_argument("--overviews", type=str, default=None,
-                        help=f"COG overviews mode (default: {DEFAULTS['overviews']})")
-    tac.add_argument("--numThreads", type=str, default=None,
-                        help=f"GDAL NUM_THREADS (default: {DEFAULTS['numThreads']})")
-    tac.add_argument("--bigTiff", type=str, default=None,
-                        help=f"BIGTIFF mode (default: {DEFAULTS['bigTiff']})")
+    tac.add_argument(
+        "--compress",
+        type=str,
+        default=None,
+        help=f"COG compression (default: {DEFAULTS['compress']})",
+    )
+    tac.add_argument(
+        "--blockSize",
+        type=int,
+        default=None,
+        help=f"COG block size in pixels (default: {DEFAULTS['blockSize']})",
+    )
+    tac.add_argument(
+        "--overviews",
+        type=str,
+        default=None,
+        help=f"COG overviews mode (default: {DEFAULTS['overviews']})",
+    )
+    tac.add_argument(
+        "--numThreads",
+        type=str,
+        default=None,
+        help=f"GDAL NUM_THREADS (default: {DEFAULTS['numThreads']})",
+    )
+    tac.add_argument(
+        "--bigTiff",
+        type=str,
+        default=None,
+        help=f"BIGTIFF mode (default: {DEFAULTS['bigTiff']})",
+    )
 
     return parser
 
@@ -173,11 +227,11 @@ def process_one(infile: Path | str, cfg: dict, inputs_count: int) -> None:
     explicit = Path(cfg["outdir"]).resolve() if cfg["outdir"] else None
 
     if tiled:
-        if explicit is None:                            # default: beside input
+        if explicit is None:  # default: beside input
             tiles_dir = Path(str(infile.with_suffix("")) + "_tiles")
-        elif inputs_count == 1:                         # single input: exact dir
+        elif inputs_count == 1:  # single input: exact dir
             tiles_dir = explicit
-        else:                                           # multi: parent root
+        else:  # multi: parent root
             tiles_dir = explicit / (infile.stem + "_tiles")
         tiles_dir.mkdir(parents=True, exist_ok=True)
         log.info(f"Tiling ({st_size / 1e9:.2f} GB) -> {tiles_dir}")
@@ -218,7 +272,7 @@ def main():
 
     inputs = resolve_inputs(cfg["infile"], (".tif", ".tiff"), "_cog.tif")
 
-    results = []          # (name, "ok" | error message)
+    results = []  # (name, "ok" | error message)
     for idx, infile in enumerate(inputs, 1):
         log.info(f"\033[96m=== {infile.name} ({idx}/{len(inputs)}) ===\033[00m")
         try:
@@ -237,6 +291,7 @@ def main():
         log.error(f"  {name}: {msg}")
     if failed:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

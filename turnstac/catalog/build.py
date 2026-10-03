@@ -1,4 +1,6 @@
 """item + collection builders, id/datetime/geometry, extension wiring"""
+
+import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Sequence
@@ -6,13 +8,17 @@ from typing import Callable, Sequence
 import pystac
 from pystac import Collection, Extent, Provider, Summaries
 from pystac.extensions.file import FileExtension
-from pystac.extensions.pointcloud import PointcloudExtension, Schema, SchemaType, Statistic
+from pystac.extensions.pointcloud import (
+    PointcloudExtension,
+    Schema,
+    SchemaType,
+    Statistic,
+)
 from pystac.extensions.projection import ProjectionExtension
 
 from ..core.registry import SIDECAR_EXTENSIONS
 from .extract import file_meta, readers
 
-import logging
 log = logging.getLogger(__name__)
 
 _GPS_EPOCH = datetime(1980, 1, 6, tzinfo=timezone.utc)
@@ -29,8 +35,9 @@ def campaign_date(name: str) -> date:
     return date.fromisoformat(m.group())
 
 
-def resolve_pc_datetime(gps_min, gps_max, campaign: date,
-                        anchor: date | None = None) -> tuple[datetime, datetime] | None:
+def resolve_pc_datetime(
+    gps_min, gps_max, campaign: date, anchor: date | None = None
+) -> tuple[datetime, datetime] | None:
     """Raw GPSTime min/max -> (start, end) UTC.
     Above one week = adjusted standard GPS time (seconds since GPS epoch minus 1e9);
     below one day = seconds of day (not in the LAS spec, but found in the data), on the anchor date;
@@ -49,7 +56,9 @@ def resolve_pc_datetime(gps_min, gps_max, campaign: date,
     else:  # weekseconds or seconds of day
         anchor = anchor or campaign
         if gps_max < gps_min:
-            log.warning(f"gps weekseconds wrap Sat->Sun ({gps_min} > {gps_max}), extending into next week")
+            log.warning(
+                f"gps weekseconds wrap Sat->Sun ({gps_min} > {gps_max}), extending into next week"
+            )
             gps_max += _WEEK
         origin = datetime.combine(anchor, datetime.min.time(), tzinfo=timezone.utc)
         if gps_max >= _DAY:  # weekseconds count from the Sunday of the anchor week
@@ -60,19 +69,30 @@ def resolve_pc_datetime(gps_min, gps_max, campaign: date,
     for edge, dt in (("start", start), ("end", end)):
         dev = abs((dt.date() - campaign).days)
         if dev > _MAX_DEVIATION_DAYS:
-            log.warning(f"gps {edge} {dt.date()} >2wk from campaign date {campaign}, rejected "
-                        f"(item falls back to campaign date)")
+            log.warning(
+                f"gps {edge} {dt.date()} >2wk from campaign date {campaign}, rejected "
+                f"(item falls back to campaign date)"
+            )
             return None
         if dev > 7:
-            log.warning(f"gps {edge} {dt.date()} deviates >7d from campaign date {campaign}")
+            log.warning(
+                f"gps {edge} {dt.date()} deviates >7d from campaign date {campaign}"
+            )
     return start, end
+
 
 # opals column type int -> stac schema type
 _STAC_SCHEMA_TYPE = {
-    0: SchemaType.SIGNED,   2: SchemaType.SIGNED,   4: SchemaType.SIGNED,   9: SchemaType.SIGNED,   # int32/8/16/64
-    1: SchemaType.UNSIGNED, 3: SchemaType.UNSIGNED, 5: SchemaType.UNSIGNED,                          # uint32/8/16
-    6: SchemaType.FLOATING, 7: SchemaType.FLOATING,    # float32 / double
-    11: SchemaType.UNSIGNED # bool is technically an uint
+    0: SchemaType.SIGNED,
+    2: SchemaType.SIGNED,
+    4: SchemaType.SIGNED,
+    9: SchemaType.SIGNED,  # int32/8/16/64
+    1: SchemaType.UNSIGNED,
+    3: SchemaType.UNSIGNED,
+    5: SchemaType.UNSIGNED,  # uint32/8/16
+    6: SchemaType.FLOATING,
+    7: SchemaType.FLOATING,  # float32 / double
+    11: SchemaType.UNSIGNED,  # bool is technically an uint
 }
 
 # eo:common_name values GDAL color interps can map to (alpha etc. get name only)
@@ -85,9 +105,11 @@ _extensions: dict[str, Callable] = {}
 
 def extension(name: str):
     """Register a populator under a registry extension key."""
+
     def deco(fn):
         _extensions[name] = fn
         return fn
+
     return deco
 
 
@@ -111,7 +133,9 @@ def _populate_pointcloud(item, pa, meta, fm) -> None:
     for s in meta.pc_schemas:
         t = _STAC_SCHEMA_TYPE.get(s["type"])
         if t is None:
-            log.warning(f"unmapped opals column type {s['type']} for {s['name']}, dim dropped from pc:schemas")
+            log.warning(
+                f"unmapped opals column type {s['type']} for {s['name']}, dim dropped from pc:schemas"
+            )
             continue
         schemas.append(Schema({"name": s["name"], "size": s["size"], "type": t.value}))
     pc = PointcloudExtension.ext(item, add_if_missing=True)
@@ -155,7 +179,11 @@ def _populate_bands(item, pa, meta, fm) -> None:
             log.warning(f"statistics dropped, not in _STAT_KEYS: {sorted(unknown)}")
     bands = []
     for b in meta.raster_bands:
-        stats = {k: b["statistics"][k] for k in _STAT_KEYS if b["statistics"].get(k) is not None}
+        stats = {
+            k: b["statistics"][k]
+            for k in _STAT_KEYS
+            if b["statistics"].get(k) is not None
+        }
         band = {}
         ci = b["color_interp"]
         # "undefined" means no colour; "gray" says nothing on a lone band
@@ -165,29 +193,39 @@ def _populate_bands(item, pa, meta, fm) -> None:
             band["name"] = name
         if ci in _EO_COMMON:
             band["eo:common_name"] = ci
-        band.update({
-            "data_type": b["data_type"],
-            "nodata": b["nodata"],
-            "unit": b["unit"],
-            "statistics": stats or None,
-            "raster:scale": b["scale"] if b["scale"] != 1.0 else None,      # identity is a no-op
-            "raster:offset": b["offset"] if b["offset"] != 0.0 else None,
-            "raster:bits_per_sample": b["bits_per_sample"],
-        })
+        band.update(
+            {
+                "data_type": b["data_type"],
+                "nodata": b["nodata"],
+                "unit": b["unit"],
+                "statistics": stats or None,
+                "raster:scale": (
+                    b["scale"] if b["scale"] != 1.0 else None
+                ),  # identity is a no-op
+                "raster:offset": b["offset"] if b["offset"] != 0.0 else None,
+                "raster:bits_per_sample": b["bits_per_sample"],
+            }
+        )
         bands.append({k: v for k, v in band.items() if v is not None})
 
     # attached in declared band order, not set order: key order must not vary between runs
-    shared = [k for k in (bands[0] if bands else ()) if k not in _BAND_IDENTITY
-              and all(k in b and b[k] == bands[0][k] for b in bands[1:])]
+    shared = [
+        k
+        for k in (bands[0] if bands else ())
+        if k not in _BAND_IDENTITY
+        and all(k in b and b[k] == bands[0][k] for b in bands[1:])
+    ]
     for key in shared:
         pa.extra_fields[key] = bands[0][key]
         for b in bands:
             del b[key]
-    for key, value in (("raster:sampling", meta.raster_sampling),
-                       ("raster:spatial_resolution", meta.raster_spatial_resolution)):
+    for key, value in (
+        ("raster:sampling", meta.raster_sampling),
+        ("raster:spatial_resolution", meta.raster_spatial_resolution),
+    ):
         if value is not None:
             pa.extra_fields[key] = value
-    if any(bands):  # all empty = single band, attached fully 
+    if any(bands):  # all empty = single band, attached fully
         pa.extra_fields["bands"] = bands
 
     written = set(pa.extra_fields) | {k for b in bands for k in b}
@@ -220,7 +258,11 @@ def _add_schema(item, uri: str) -> None:
         item.stac_extensions.append(uri)
 
 
-_SIDECAR_MEDIA = {".prj": "text/plain", ".tfw": "text/plain", ".aux.xml": "application/xml"}
+_SIDECAR_MEDIA = {
+    ".prj": "text/plain",
+    ".tfw": "text/plain",
+    ".aux.xml": "application/xml",
+}
 
 
 def _round_coords(v):
@@ -254,13 +296,19 @@ def merged_properties(properties: dict | None, product) -> dict:
     return {k: v for k, v in merged.items() if v is not None}
 
 
-def build_item(product, campaign: date, *, created: datetime | None = None,
-               properties: dict | None = None, crs: str | None = None) -> pystac.Item:
+def build_item(
+    product,
+    campaign: date,
+    *,
+    created: datetime | None = None,
+    properties: dict | None = None,
+    crs: str | None = None,
+) -> pystac.Item:
     """discover::Product -> populated pystac.Item.
-        1) readers -> AssetMeta
-        2) resolve datetime
-        3) populators add extensions
-        4) apply created (idempotency) + properties (sidecar)
+    1) readers -> AssetMeta
+    2) resolve datetime
+    3) populators add extensions
+    4) apply created (idempotency) + properties (sidecar)
     """
     extracted = []
     for a in product.assets:
@@ -274,16 +322,24 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
     try:
         token = campaign_date(product.assets[0].path.name)
         if abs((token - campaign).days) > _MAX_DEVIATION_DAYS:
-            log.warning(f"filename date {token} >2wk from campaign date {campaign}, using campaign "
-                        f"date (filename should encode image acquisition date, not processing "
-                        f"time): {product.id}")
+            log.warning(
+                f"filename date {token} >2wk from campaign date {campaign}, using campaign "
+                f"date (filename should encode image acquisition date, not processing "
+                f"time): {product.id}"
+            )
             token = campaign
         elif token != campaign:
-            log.warning(f"filename date {token} deviates from campaign date {campaign}: {product.id}")
+            log.warning(
+                f"filename date {token} deviates from campaign date {campaign}: {product.id}"
+            )
     except ValueError:
         token = campaign
     span = resolve_pc_datetime(m0.pc_gps_time_min, m0.pc_gps_time_max, campaign, token)
-    start = span[0] if span else datetime.combine(token, datetime.min.time(), tzinfo=timezone.utc)
+    start = (
+        span[0]
+        if span
+        else datetime.combine(token, datetime.min.time(), tzinfo=timezone.utc)
+    )
 
     geometry, bbox = m0.geometry_wgs84, m0.bbox_wgs84
     if geometry is not None:
@@ -301,7 +357,9 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
     if span:
         item.common_metadata.start_datetime = span[0]
         item.common_metadata.end_datetime = span[1]
-    item.properties["title"] = _item_title(product, campaign)  # sidecar byId title overrides below
+    item.properties["title"] = _item_title(
+        product, campaign
+    )  # sidecar byId title overrides below
 
     for a, meta, fm in extracted:
         pa = pystac.Asset(
@@ -319,10 +377,19 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
         for sc in a.sidecars:
             # key = matched sidecar type (prj | tfw | aux.xml), covers foo.tif.aux.xml too
             low = sc.name.lower()
-            ext = next(e for e in sorted(SIDECAR_EXTENSIONS, key=len, reverse=True) if low.endswith(e))
-            item.add_asset(ext.lstrip("."), pystac.Asset(href=sc.resolve().as_posix(),
-                                                         media_type=_SIDECAR_MEDIA.get(ext),
-                                                         roles=["metadata"]))
+            ext = next(
+                e
+                for e in sorted(SIDECAR_EXTENSIONS, key=len, reverse=True)
+                if low.endswith(e)
+            )
+            item.add_asset(
+                ext.lstrip("."),
+                pystac.Asset(
+                    href=sc.resolve().as_posix(),
+                    media_type=_SIDECAR_MEDIA.get(ext),
+                    roles=["metadata"],
+                ),
+            )
 
     if m0.raster_spatial_resolution is not None:
         item.common_metadata.gsd = m0.raster_spatial_resolution
@@ -335,7 +402,9 @@ def build_item(product, campaign: date, *, created: datetime | None = None,
     return item
 
 
-def refresh_item(prev, product, campaign: date, properties: dict | None = None) -> pystac.Item:
+def refresh_item(
+    prev, product, campaign: date, properties: dict | None = None
+) -> pystac.Item:
     """Carry a cataloged item over with the sidecar properties overlay reapplied.
     No read, no hash. A key deleted from the sidecar is not undone, that needs --force.
 
@@ -348,7 +417,9 @@ def refresh_item(prev, product, campaign: date, properties: dict | None = None) 
       a new pystac.Item, the previous one untouched
     """
     item = prev.clone()
-    item.properties["title"] = _item_title(product, campaign)  # a sidecar title overrides below
+    item.properties["title"] = _item_title(
+        product, campaign
+    )  # a sidecar title overrides below
     item.properties.update(merged_properties(properties, product))
     item.common_metadata.updated = datetime.now(timezone.utc)
     return item
@@ -389,17 +460,31 @@ def _summarize(items) -> Summaries | None:
         if vals:
             out[f] = sorted(vals)
     for f in _SUMMARY_RANGES:
-        nums = [i.properties[f] for i in items if isinstance(i.properties.get(f), (int, float))]
+        nums = [
+            i.properties[f]
+            for i in items
+            if isinstance(i.properties.get(f), (int, float))
+        ]
         if nums:
             out[f] = {"minimum": min(nums), "maximum": max(nums)}
     return Summaries(out) if out else None
 
 
 # id consumed upstream in manager.process_campaign
-_COLLECTION_META_KEYS = {"id", "title", "description", "license", "license_link", "providers", "keywords"}
+_COLLECTION_META_KEYS = {
+    "id",
+    "title",
+    "description",
+    "license",
+    "license_link",
+    "providers",
+    "keywords",
+}
 
 
-def build_collection(cid: str, meta: dict, items: list, children: Sequence = ()) -> Collection:
+def build_collection(
+    cid: str, meta: dict, items: list, children: Sequence = ()
+) -> Collection:
     """Collection factory for campaign collections and tile subcollections.
     Extent + curated summaries from items + children's items. meta keys used: title,
     description, license, providers, keywords. providers takes the STAC list form or
@@ -410,7 +495,9 @@ def build_collection(cid: str, meta: dict, items: list, children: Sequence = ())
 
     unknown = set(meta) - _COLLECTION_META_KEYS
     if unknown:
-        log.warning(f"collection {cid}: ignored unknown sidecar keys: {sorted(unknown)}")
+        log.warning(
+            f"collection {cid}: ignored unknown sidecar keys: {sorted(unknown)}"
+        )
 
     providers = meta.get("providers") or []
     if isinstance(providers, dict):  # name-as-key convenience form
@@ -429,9 +516,13 @@ def build_collection(cid: str, meta: dict, items: list, children: Sequence = ())
     _declare_summary_extensions(coll)
     lic_link = meta.get("license_link")
     if lic_link:
-        coll.add_link(pystac.Link(rel="license", target=lic_link, title=meta.get("license")))
+        coll.add_link(
+            pystac.Link(rel="license", target=lic_link, title=meta.get("license"))
+        )
     elif meta.get("license") == "other":
-        log.warning(f"collection {cid}: license 'other' without a license_link (spec recommends one)")
+        log.warning(
+            f"collection {cid}: license 'other' without a license_link (spec recommends one)"
+        )
     for c in children:
         coll.add_child(c)
     for i in items:

@@ -26,12 +26,12 @@ log = logging.getLogger(__name__)
 OPALS_INFO = {"nbThreads": None, "exactComputation": True}
 
 # footprint tuning. Ground units throughout, so every item filters the same regardless of pixel count
-_FOOTPRINT_GRID = 2048    # px, longest edge of the working grid
-_MIN_PART_M2    = 4000.0  # footprint parts below this are mask noise
-_MIN_HOLE_M2    = 1000.0  # interior gaps below this are not represented
-_SIMPLIFY_M     = 6.0     # vertex tolerance; above a gap's radius the ring collapses
-_MIN_AREA_RATIO = 0.5     # footprint below this share of the valid area -> bbox rectangle
-_MIN_CELL_M     = 6.0     # point-cloud grid cell floor; finer detail is simplified away anyway
+_FOOTPRINT_GRID = 2048  # px, longest edge of the working grid
+_MIN_PART_M2 = 4000.0  # footprint parts below this are mask noise
+_MIN_HOLE_M2 = 1000.0  # interior gaps below this are not represented
+_SIMPLIFY_M = 6.0  # vertex tolerance; above a gap's radius the ring collapses
+_MIN_AREA_RATIO = 0.5  # footprint below this share of the valid area -> bbox rectangle
+_MIN_CELL_M = 6.0  # point-cloud grid cell floor; finer detail is simplified away anyway
 
 # what gdalinfo -hist reports
 _HIST_BUCKETS = 32
@@ -41,31 +41,32 @@ _HIST_BUCKETS = 32
 class AssetMeta:
     """Every piece of asset metadata a reader can produce; populators build their
     extension from these. Expand as more extensions land."""
+
     # Pointcloud
-    pc_count:      int                 | None = None
-    pc_type:       str                 | None = None
-    pc_density:    float               | None = None
-    pc_schemas:    list[dict[str, Any]] = field(default_factory=list)
+    pc_count: int | None = None
+    pc_type: str | None = None
+    pc_density: float | None = None
+    pc_schemas: list[dict[str, Any]] = field(default_factory=list)
     pc_statistics: list[dict[str, Any]] = field(default_factory=list)
-    pc_gps_time_min:  float            | None = None  # raw, weekseconds or adjusted standard
-    pc_gps_time_max:  float            | None = None  # resolved to UTC in build (campaign date)
+    pc_gps_time_min: float | None = None  # raw, weekseconds or adjusted standard
+    pc_gps_time_max: float | None = None  # resolved to UTC in build (campaign date)
 
     # raster (STAC 1.1 unified bands feed both raster + eo populators)
-    raster_bands:   list[dict[str, Any]] = field(default_factory=list)
-    raster_sampling: str                | None = None  # "area" | "point" (raster:sampling)
-    raster_spatial_resolution: float    | None = None  # abs(gt[1]), square pixels assumed
-    dt_processing:  datetime            | None = None  # TIFFTAG_DATETIME, when the file was written
+    raster_bands: list[dict[str, Any]] = field(default_factory=list)
+    raster_sampling: str | None = None  # "area" | "point" (raster:sampling)
+    raster_spatial_resolution: float | None = None  # abs(gt[1]), square pixels assumed
+    dt_processing: datetime | None = None  # TIFFTAG_DATETIME, when the file was written
 
     # Projection metadata
-    proj_wkt:       str      | None = None
-    proj_epsg:      int      | None = None
-    proj_shape:     list     | None = None  # [height, width] (proj:shape order)
-    proj_transform: list     | None = None  # STAC proj:transform order
-    proj_bbox:      list     | None = None  # native CRS [minx, miny, maxx, maxy]
+    proj_wkt: str | None = None
+    proj_epsg: int | None = None
+    proj_shape: list | None = None  # [height, width] (proj:shape order)
+    proj_transform: list | None = None  # STAC proj:transform order
+    proj_bbox: list | None = None  # native CRS [minx, miny, maxx, maxy]
 
     # General
-    geometry_wgs84: dict     | None = None  # GeoJSON Polygon
-    bbox_wgs84:     list     | None = None
+    geometry_wgs84: dict | None = None  # GeoJSON Polygon
+    bbox_wgs84: list | None = None
 
 
 @dataclass
@@ -104,20 +105,34 @@ def _wgs84_footprint(srs, proj_bbox: list) -> tuple[dict, list]:
     n = 21
     ex = [proj_bbox[0] + (proj_bbox[2] - proj_bbox[0]) * i / n for i in range(n + 1)]
     ey = [proj_bbox[1] + (proj_bbox[3] - proj_bbox[1]) * i / n for i in range(n + 1)]
-    ring = ([(x, proj_bbox[1]) for x in ex] + [(x, proj_bbox[3]) for x in ex]
-            + [(proj_bbox[0], y) for y in ey] + [(proj_bbox[2], y) for y in ey])
+    ring = (
+        [(x, proj_bbox[1]) for x in ex]
+        + [(x, proj_bbox[3]) for x in ex]
+        + [(proj_bbox[0], y) for y in ey]
+        + [(proj_bbox[2], y) for y in ey]
+    )
     pts = ct.TransformPoints(ring)
     lons, lats = [p[0] for p in pts], [p[1] for p in pts]
     lonmin, latmin, lonmax, latmax = min(lons), min(lats), max(lons), max(lats)
-    geometry = {"type": "Polygon", "coordinates": [[
-        [lonmin, latmin], [lonmax, latmin], [lonmax, latmax], [lonmin, latmax], [lonmin, latmin],
-    ]]}
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [lonmin, latmin],
+                [lonmax, latmin],
+                [lonmax, latmax],
+                [lonmin, latmax],
+                [lonmin, latmin],
+            ]
+        ],
+    }
     return geometry, [lonmin, latmin, lonmax, latmax]
 
 
 def _drop_small_holes(poly, min_hole: float):
     """Rebuild a polygon: exterior ring plus only interior rings >= min_hole. Survivors
-    are the real data gaps; slivers below the threshold are mask noise that blows up the ring count."""
+    are the real data gaps; slivers below the threshold are mask noise that blows up the ring count.
+    """
     out = ogr.Geometry(ogr.wkbPolygon)
     out.AddGeometry(poly.GetGeometryRef(0).Clone())  # exterior ring
     for i in range(1, poly.GetGeometryCount()):
@@ -138,6 +153,7 @@ def _decimated_mask(band, w: int, h: int, k: int):
       np.ndarray | None
     """
     import numpy as np
+
     mask = band.GetMaskBand()
     bw, bh = -(-w // k), -(-h // k)
     out = np.zeros((bh, bw), dtype=bool)
@@ -151,7 +167,7 @@ def _decimated_mask(band, w: int, h: int, k: int):
             return None
         # trailing pixels zero-pad
         buf[:] = False
-        buf[:strip.shape[0], :w] = strip > 0
+        buf[: strip.shape[0], :w] = strip > 0
         out[row] = buf.reshape(k, bw, k).mean(axis=(0, 2)) >= 0.5
     return out
 
@@ -160,7 +176,7 @@ def _grid_footprint(valid, gt, srs) -> tuple[dict, list, float] | None:
     """Turns a boolean occupancy grid into a published footprint: sieve
     speckle, polygonize, throw out small parts and small holes, simplify,
     reproject to WGS84. Used for pcl and raster
-    
+
     args:
       valid - mask bool grid array
       gt    - tuple[6] geotransformation of valid
@@ -168,15 +184,22 @@ def _grid_footprint(valid, gt, srs) -> tuple[dict, list, float] | None:
 
     returns:
       tuple (GeoJSON geometry, [minx, miny, maxx, maxy], area) | None
-      """
-    mem = gdal.GetDriverByName("MEM").Create("", valid.shape[1], valid.shape[0], 1, gdal.GDT_Byte)
+    """
+    mem = gdal.GetDriverByName("MEM").Create(
+        "", valid.shape[1], valid.shape[0], 1, gdal.GDT_Byte
+    )
     mem.SetGeoTransform(gt)
     mem.GetRasterBand(1).WriteArray(valid.astype("uint8") * 255)
     # drop speckle before polygonizing, cheaper here:
     # noisy grid yields thousand polygons otherwhise
     cell_m2 = abs(gt[1] * gt[5])
-    gdal.SieveFilter(mem.GetRasterBand(1), None, mem.GetRasterBand(1),
-                     max(1, int(min(_MIN_PART_M2, _MIN_HOLE_M2) / cell_m2)), 4)
+    gdal.SieveFilter(
+        mem.GetRasterBand(1),
+        None,
+        mem.GetRasterBand(1),
+        max(1, int(min(_MIN_PART_M2, _MIN_HOLE_M2) / cell_m2)),
+        4,
+    )
 
     vds = ogr.GetDriverByName("Memory").CreateDataSource("")
     lyr = vds.CreateLayer("footprint", srs=srs)
@@ -203,7 +226,9 @@ def _grid_footprint(valid, gt, srs) -> tuple[dict, list, float] | None:
     return json.loads(geom.ExportToJson()), [minx, miny, maxx, maxy], area_m2
 
 
-def _mask_footprint(ds, gt, srs, w: int, h: int, valid_frac: float) -> tuple[dict, list] | None:
+def _mask_footprint(
+    ds, gt, srs, w: int, h: int, valid_frac: float
+) -> tuple[dict, list] | None:
     """True data footprint from band 1's mask (nodata/alpha/internal): decimated read,
     polygonize, filter, simplify, reproject to WGS84.
     If lost too much valid data refuse result and keep bbox
@@ -224,7 +249,9 @@ def _mask_footprint(ds, gt, srs, w: int, h: int, valid_frac: float) -> tuple[dic
     valid = _decimated_mask(band, w, h, k)
     if valid is None or valid.all() or not valid.any():
         return None  # rectangle is the truth / mask degenerate
-    fp = _grid_footprint(valid, (gt[0], gt[1] * k, gt[2] * k, gt[3], gt[4] * k, gt[5] * k), srs)
+    fp = _grid_footprint(
+        valid, (gt[0], gt[1] * k, gt[2] * k, gt[3], gt[4] * k, gt[5] * k), srs
+    )
     if fp is None:
         return None
     geometry, bbox, area_m2 = fp
@@ -232,8 +259,10 @@ def _mask_footprint(ds, gt, srs, w: int, h: int, valid_frac: float) -> tuple[dic
     # a footprint that lost most of the data is worse than none
     exact_m2 = valid_frac * w * h * abs(gt[1] * gt[5])
     if exact_m2 and area_m2 < _MIN_AREA_RATIO * exact_m2:
-        log.warning(f"footprint covers {area_m2 / exact_m2:.0%} of the valid data, "
-                    f"keeping bbox rectangle: {ds.GetDescription()}")
+        log.warning(
+            f"footprint covers {area_m2 / exact_m2:.0%} of the valid data, "
+            f"keeping bbox rectangle: {ds.GetDescription()}"
+        )
         return None
     return geometry, bbox
 
@@ -241,7 +270,8 @@ def _mask_footprint(ds, gt, srs, w: int, h: int, valid_frac: float) -> tuple[dic
 def _pcl_footprint(path, proj_bbox: list, srs) -> tuple[dict, list] | None:
     """True footprint of a COPC cloud: coarse octree levels binned into an occupancy grid,
     then routed to same function rasters use.
-    Uses laspy's copc reader to avoid reading the whole mask again, opals no copc reader"""
+    Uses laspy's copc reader to avoid reading the whole mask again, opals no copc reader
+    """
     import numpy as np
     from laspy import CopcReader
 
@@ -271,13 +301,17 @@ def _fallback_srs(crs: str, path) -> "osr.SpatialReference":
     try:
         srs.SetFromUserInput(str(crs))
     except RuntimeError as e:
-        raise ValueError(f"{path}: invalid sidecar crs {crs!r}: {e}\n expected: (EPSG:xxxx or WKT)") from e
+        raise ValueError(
+            f"{path}: invalid sidecar crs {crs!r}: {e}\n expected: (EPSG:xxxx or WKT)"
+        ) from e
     # this fixes gdal issue switching (easting, northing)
     srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     return srs
 
 
-def _histogram(band, minimum: float | None, maximum: float | None, path: str) -> dict | None:
+def _histogram(
+    band, minimum: float | None, maximum: float | None, path: str
+) -> dict | None:
     """Exact value distribution over the valid pixels using gdalinfo -hist.
     returns:
       dict of the STAC Histogram Object
@@ -290,18 +324,25 @@ def _histogram(band, minimum: float | None, maximum: float | None, path: str) ->
     lo, hi = _r(minimum - width / 2), _r(maximum + width / 2)
     # include_out_of_range keeps the bucket sum at the valid pixel count, approx_ok=0 keeps the
     # distribution as exact as the statistics its edges come from
-    return {"count": _HIST_BUCKETS, "min": lo, "max": hi,
-            "buckets": band.GetHistogram(lo, hi, _HIST_BUCKETS, 1, 0)}
+    return {
+        "count": _HIST_BUCKETS,
+        "min": lo,
+        "max": hi,
+        "buckets": band.GetHistogram(lo, hi, _HIST_BUCKETS, 1, 0),
+    }
 
 
 def _alpha_stats(band, w: int, h: int) -> tuple:
     """min, max, mean, stddev over the non-transparent pixels; GDAL < 3.7 counts all of them."""
     import numpy as np
+
     mask = band.GetMaskBand()
     n, total, squares, lo, hi = 0, 0.0, 0.0, math.inf, -math.inf
     for y0 in range(0, h, 64):  # strips, the 2024 orthophoto has 5.9 Gpx per band
         ny = min(64, h - y0)
-        v = band.ReadAsArray(0, y0, w, ny)[mask.ReadAsArray(0, y0, w, ny) > 0].astype(np.float64)
+        v = band.ReadAsArray(0, y0, w, ny)[mask.ReadAsArray(0, y0, w, ny) > 0].astype(
+            np.float64
+        )
         if v.size:
             n, total, squares = n + v.size, total + v.sum(), squares + (v * v).sum()
             lo, hi = min(lo, v.min()), max(hi, v.max())
@@ -316,12 +357,13 @@ def _r(value, kommastelle=4):
         return value
     return round(value, kommastelle)
 
+
 def raster(path: str, crs: str | None = None) -> AssetMeta:
     """Reader for raster metadata via GDAL, extracts:
     per-band statistics (exact, full scan), nodata, colour interpretation,
     scale/offset, an optional histogram, native and WGS84 bboxes,
     and mask-derived footprint.
-    
+
     returns:
       AssetMeta object
     """
@@ -335,8 +377,10 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
         srs = _fallback_srs(crs, path)
     if srs is None:
         log.error(f"no CRS readable: {path}")
-        raise ValueError(f"{path}: no CRS readable (check PROJ_LIB/GDAL_DATA, "
-                         f"or set 'crs' in campaign.yaml)")
+        raise ValueError(
+            f"{path}: no CRS readable (check PROJ_LIB/GDAL_DATA, "
+            f"or set 'crs' in campaign.yaml)"
+        )
 
     gt = ds.GetGeoTransform()
     w, h = ds.RasterXSize, ds.RasterYSize
@@ -344,7 +388,9 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
     bands = []
     for i in range(1, ds.RasterCount + 1):
         b = ds.GetRasterBand(i)
-        alpha = b.GetMaskFlags() & gdal.GMF_ALPHA  # orthophoto colour bands; the alpha band itself is all valid
+        alpha = (
+            b.GetMaskFlags() & gdal.GMF_ALPHA
+        )  # orthophoto colour bands; the alpha band itself is all valid
         stats = _alpha_stats(b, w, h) if alpha else b.ComputeStatistics(False)
         minimum, maximum, mean, stddev = (_finite(v) for v in stats)
         if b.GetMaskFlags() == gdal.GMF_ALL_VALID:
@@ -356,20 +402,30 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
         nbits = b.GetMetadataItem("NBITS", "IMAGE_STRUCTURE")
         # histograms for single band only
         hist = _histogram(b, minimum, maximum, path) if ds.RasterCount == 1 else None
-        bands.append({
-            "index":        i,
-            "data_type":    _dtype_name(b.DataType),
-            "nodata":       _json_nodata(b.GetNoDataValue()),
-            "color_interp": gdal.GetColorInterpretationName(b.GetColorInterpretation()).lower(),
-            "description":  b.GetDescription() or None,
-            "unit":         b.GetUnitType() or None,
-            "scale":        b.GetScale(),
-            "offset":       b.GetOffset(),
-            "bits_per_sample": int(nbits) if nbits else None,
-            "statistics":   {"minimum": _r(minimum), "maximum": _r(maximum), "mean": _r(mean), "stddev": _r(stddev),
-                             "valid_percent": valid_percent, "count": count},
-            "histogram":    hist,
-        })
+        bands.append(
+            {
+                "index": i,
+                "data_type": _dtype_name(b.DataType),
+                "nodata": _json_nodata(b.GetNoDataValue()),
+                "color_interp": gdal.GetColorInterpretationName(
+                    b.GetColorInterpretation()
+                ).lower(),
+                "description": b.GetDescription() or None,
+                "unit": b.GetUnitType() or None,
+                "scale": b.GetScale(),
+                "offset": b.GetOffset(),
+                "bits_per_sample": int(nbits) if nbits else None,
+                "statistics": {
+                    "minimum": _r(minimum),
+                    "maximum": _r(maximum),
+                    "mean": _r(mean),
+                    "stddev": _r(stddev),
+                    "valid_percent": valid_percent,
+                    "count": count,
+                },
+                "histogram": hist,
+            }
+        )
 
     # native bbox from geotransform corners (handles rotated rasters)
     xs = [gt[0], gt[0] + w * gt[1], gt[0] + h * gt[2], gt[0] + w * gt[1] + h * gt[2]]
@@ -378,8 +434,9 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
 
     geometry, bbox_wgs84 = _wgs84_footprint(srs, proj_bbox)
     try:
-        fp = _mask_footprint(ds, gt, srs, w, h,
-                             bands[0]["statistics"]["valid_percent"] / 100)
+        fp = _mask_footprint(
+            ds, gt, srs, w, h, bands[0]["statistics"]["valid_percent"] / 100
+        )
     except Exception as e:
         log.warning(f"footprint failed, keeping bbox rectangle ({path}): {e}")
         fp = None
@@ -446,13 +503,15 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
 
     statistics = [
         {
-            "name":    _attr_name(a),
-            "count":   a.getCount(),
+            "name": _attr_name(a),
+            "count": a.getCount(),
             "minimum": _finite(a.getMin()),
             "maximum": _finite(a.getMax()),
             "average": _finite(a.getMean()),
-            "stddev":  _finite(a.getStd()),
-        } for a in attributes if a.getMin() != a.getMax()  # constant dims carry no signal
+            "stddev": _finite(a.getStd()),
+        }
+        for a in attributes
+        if a.getMin() != a.getMax()  # constant dims carry no signal
     ]
     statistics = [{k: _r(v) for k, v in s.items() if v is not None} for s in statistics]
 
@@ -462,16 +521,29 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
         {
             "name": _attr_name(a),
             "size": a.getStorageSize(),
-            "type": a.getType()  # DM::ColumnType int mapped in build.py
-        } for a in attributes # constant dimns are still extracted
+            "type": a.getType(),  # DM::ColumnType int mapped in build.py
+        }
+        for a in attributes  # constant dimns are still extracted
     ]
 
     # raw GPSTime, resolved to UTC in build; found by shortname so the display
     # name stays free; constant GPSTime is filtered out
-    gps_attr = next((a for a in attributes
-                     if a.getName().split()[0] == "GPSTime" and a.getMin() != a.getMax()
-                     and math.isfinite(a.getMin()) and math.isfinite(a.getMax())), None)
-    gps = {"minimum": gps_attr.getMin(), "maximum": gps_attr.getMax()} if gps_attr else None
+    gps_attr = next(
+        (
+            a
+            for a in attributes
+            if a.getName().split()[0] == "GPSTime"
+            and a.getMin() != a.getMax()
+            and math.isfinite(a.getMin())
+            and math.isfinite(a.getMax())
+        ),
+        None,
+    )
+    gps = (
+        {"minimum": gps_attr.getMin(), "maximum": gps_attr.getMax()}
+        if gps_attr
+        else None
+    )
 
     wkt = stats.getCoordRefSys()
     if wkt:
@@ -487,8 +559,10 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
         wkt = srs.ExportToWkt(["FORMAT=WKT2_2018"])
     else:
         log.error(f"no CRS readable: {path}")
-        raise ValueError(f"{path}: no CRS readable (check PROJ_LIB/GDAL_DATA, "
-                         f"or set 'crs' in campaign.yaml)")
+        raise ValueError(
+            f"{path}: no CRS readable (check PROJ_LIB/GDAL_DATA, "
+            f"or set 'crs' in campaign.yaml)"
+        )
 
     # EPSG attempt so pointcloud items get proj:code like rasters do
     code = srs.GetAuthorityCode(None)
@@ -517,7 +591,9 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
     density = stats.getPointDensity()
     return AssetMeta(
         pc_count=stats.getPointCount(),
-        pc_density=None if math.isnan(density) else density,  # nan when exactComputation off
+        pc_density=(
+            None if math.isnan(density) else density
+        ),  # nan when exactComputation off
         pc_type="lidar",  # sidecar properties override it, e.g. "pc:type": dim
         pc_schemas=schemas,
         pc_statistics=statistics,
@@ -555,6 +631,7 @@ def pcl_point_count(p: Path | str) -> int:
     expensive opalsInfo exactComputation"""
     # TODO: could also be achieved with fixed opalsinfo exact 0 but need laspy otherwhere anyways
     import laspy
+
     with laspy.open(str(p)) as r:
         return r.header.point_count
 

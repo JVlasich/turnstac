@@ -1,4 +1,5 @@
 """Convert LAZ input(s) to COPC without tiling."""
+
 import argparse
 import logging
 import subprocess
@@ -6,8 +7,7 @@ import sys
 from pathlib import Path
 
 from ..core.log import setup
-
-from .common import resolve_inputs, _BIN, _COPCINDEX
+from .common import _BIN, _COPCINDEX, resolve_inputs
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +17,10 @@ def to_copc(infile: Path, odir: Path) -> Path:
     success is judged by the output existing, not by the exit code."""
     out = odir / f"{infile.stem}.copc.laz"
     log.debug(f"indexing {infile.name} -> {out.name}")
-    subprocess.run([str(_BIN / _COPCINDEX), "-i", str(infile), "-odir", str(odir), "-progress"],
-                   check=False)
+    subprocess.run(
+        [str(_BIN / _COPCINDEX), "-i", str(infile), "-odir", str(odir), "-progress"],
+        check=False,
+    )
     if not out.exists():
         raise RuntimeError("lascopcindex produced no output")
     return out
@@ -26,11 +28,18 @@ def to_copc(infile: Path, odir: Path) -> Path:
 
 def main():
     ap = argparse.ArgumentParser(description="Convert LAZ file(s) to COPC, no tiling.")
-    ap.add_argument("--infile", nargs="+", required=True, help="LAZ file(s) and/or directories")
-    ap.add_argument("--outdir", default=None,
-                    help="Output dir (default: beside each input)")
-    ap.add_argument("--loglevel", choices=["warning", "info", "debug", "none"], default="info",
-                    help="Console log level (default: info)")
+    ap.add_argument(
+        "--infile", nargs="+", required=True, help="LAZ file(s) and/or directories"
+    )
+    ap.add_argument(
+        "--outdir", default=None, help="Output dir (default: beside each input)"
+    )
+    ap.add_argument(
+        "--loglevel",
+        choices=["warning", "info", "debug", "none"],
+        default="info",
+        help="Console log level (default: info)",
+    )
     args = ap.parse_args()
     setup(args.loglevel)
 
@@ -39,7 +48,7 @@ def main():
     for f in inputs:
         odir = Path(args.outdir).resolve() if args.outdir else f.parent
         odir.mkdir(parents=True, exist_ok=True)
-        if (odir / f"{f.stem}.copc.laz").exists():   # idempotent: skip already-converted
+        if (odir / f"{f.stem}.copc.laz").exists():  # idempotent: skip already-converted
             log.info(f"skip (exists): {f.stem}.copc.laz")
             results.append((f.name, "ok"))
             continue

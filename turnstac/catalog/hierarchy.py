@@ -19,7 +19,7 @@ WILDCARDS = "*?["
 
 @dataclass
 class Node:
-    name: str | None            # None = flat in the campaign collection
+    name: str | None  # None = flat in the campaign collection
     title: str | None = None
     description: str | None = None
     products: list = field(default_factory=list)
@@ -57,10 +57,14 @@ def resolve_hierarchy(products, hier: dict | None = None) -> list[Node]:
             used.add(p.id)
             g = placement[p.id]
         elif hits:
-            if len(hits) > 1 and tuple(hits) not in warned:  # once per overlap, not per product
+            if (
+                len(hits) > 1 and tuple(hits) not in warned
+            ):  # once per overlap, not per product
                 warned.add(tuple(hits))
-                log.warning(f"placement patterns {hits} overlap, first wins: {hits[0]!r} "
-                            f"(first hit: {p.id})")
+                log.warning(
+                    f"placement patterns {hits} overlap, first wins: {hits[0]!r} "
+                    f"(first hit: {p.id})"
+                )
             g = placement[hits[0]]
             log.debug(f"placement pattern {hits[0]!r} puts {p.id} into {g or '<flat>'}")
         else:
@@ -76,7 +80,9 @@ def resolve_hierarchy(products, hier: dict | None = None) -> list[Node]:
     nodes = [Node(None, products=buckets.pop(None, []))]
     for name in sorted(buckets):
         meta = groups_meta.get(name) or {}
-        nodes.append(Node(name, meta.get("title"), meta.get("description"), buckets[name]))
+        nodes.append(
+            Node(name, meta.get("title"), meta.get("description"), buckets[name])
+        )
 
     for name in sorted(set(groups_meta) - {n.name for n in nodes}):
         log.warning(f"hierarchy group {name!r} has no products, dropped")
