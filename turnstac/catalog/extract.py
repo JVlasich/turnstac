@@ -293,6 +293,24 @@ def _histogram(band, minimum: float | None, maximum: float | None, path: str) ->
     return {"count": _HIST_BUCKETS, "min": lo, "max": hi,
             "buckets": band.GetHistogram(lo, hi, _HIST_BUCKETS, 1, 0)}
 
+
+def _alpha_stats(band, w: int, h: int) -> tuple:
+    """min, max, mean, stddev over the non-transparent pixels; GDAL < 3.7 counts all of them."""
+    import numpy as np
+    mask = band.GetMaskBand()
+    n, total, squares, lo, hi = 0, 0.0, 0.0, math.inf, -math.inf
+    for y0 in range(0, h, 64):  # strips, the 2024 orthophoto has 5.9 Gpx per band
+        ny = min(64, h - y0)
+        v = band.ReadAsArray(0, y0, w, ny)[mask.ReadAsArray(0, y0, w, ny) > 0].astype(np.float64)
+        if v.size:
+            n, total, squares = n + v.size, total + v.sum(), squares + (v * v).sum()
+            lo, hi = min(lo, v.min()), max(hi, v.max())
+    if not n:
+        return None, None, None, None
+    mean = float(total) / n
+    return float(lo), float(hi), mean, math.sqrt(max(squares / n - mean * mean, 0.0))
+
+
 def _r(value, kommastelle=4):
     if not isinstance(value, (int, float)):
         return value
@@ -326,7 +344,9 @@ def raster(path: str, crs: str | None = None) -> AssetMeta:
     bands = []
     for i in range(1, ds.RasterCount + 1):
         b = ds.GetRasterBand(i)
-        minimum, maximum, mean, stddev = (_finite(v) for v in b.ComputeStatistics(False))
+        alpha = b.GetMaskFlags() & gdal.GMF_ALPHA  # orthophoto colour bands; the alpha band itself is all valid
+        stats = _alpha_stats(b, w, h) if alpha else b.ComputeStatistics(False)
+        minimum, maximum, mean, stddev = (_finite(v) for v in stats)
         if b.GetMaskFlags() == gdal.GMF_ALL_VALID:
             valid_percent, count = 100.0, w * h
         else:
@@ -436,7 +456,8 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
     ]
     statistics = [{k: _r(v) for k, v in s.items() if v is not None} for s in statistics]
 
-    # schemas list every dimension the file has, unfiltered (pc:schemas = truth)
+    # every attribute opals reports, unfiltered. Reader types, not storage types (known limitation):
+    # Amplitude and ScanAngle come as float, X/Y/Z are not listed
     schemas = [
         {
             "name": _attr_name(a),

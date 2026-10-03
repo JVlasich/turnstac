@@ -239,6 +239,40 @@ def test_histogram_only_on_single_band_rasters(tmp_path, write_rgb_tif):
     assert all(b["histogram"] is None for b in raster(tmp_path / "ortho.tif").raster_bands)
 
 
+def _write_rgba_tif(path, alpha: bytes) -> None:
+    """8x8 RGBA on the _write_tif grid, colour 250 on the left half and 10 / 30 on the right."""
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(31256)
+    ds = gdal.GetDriverByName("GTiff").Create(str(path), 8, 8, 4, gdal.GDT_Byte, ["ALPHA=YES"])
+    ds.SetGeoTransform((-53000, 25, 0, 340000, 0, -25))
+    ds.SetProjection(srs.ExportToWkt())
+    for i in (1, 2, 3):
+        ds.GetRasterBand(i).WriteRaster(0, 0, 8, 8, bytes([250] * 4 + [10, 30] * 2) * 8)
+    ds.GetRasterBand(4).WriteRaster(0, 0, 8, 8, alpha)
+    ds = None
+
+
+def test_alpha_masked_statistics_skip_transparent_pixels(tmp_path):
+    # RGBA, left half transparent but holding 250 (not 0), right half alternating 10 / 30.
+    # GDAL 3.1.2 counts the transparent half; the statistics must describe the visible half only
+    _write_rgba_tif(tmp_path / "ortho.tif", bytes([0] * 4 + [255] * 4) * 8)
+
+    bands = raster(tmp_path / "ortho.tif").raster_bands
+    for b in bands[:3]:
+        st = b["statistics"]
+        assert (st["minimum"], st["maximum"], st["mean"], st["stddev"]) == (10, 30, 20, 10), st
+    # the alpha band is the mask itself and keeps statistics over every pixel
+    assert bands[3]["statistics"]["mean"] == 127.5
+    assert bands[3]["statistics"]["valid_percent"] == 100.0
+
+
+def test_alpha_masked_statistics_fully_transparent(tmp_path):
+    # an edge tile of a tiled orthophoto can be transparent throughout: no values, no crash
+    _write_rgba_tif(tmp_path / "ortho.tif", bytes(64))
+    st = raster(tmp_path / "ortho.tif").raster_bands[0]["statistics"]
+    assert (st["minimum"], st["maximum"], st["mean"], st["stddev"]) == (None, None, None, None)
+
+
 def test_histogram_over_nan_nodata_stays_json_safe(tmp_path):
     # float band with nodata=NaN and a real value range: the bucket edges are derived from the
     # statistics, so a NaN leaking into them would put invalid JSON in every item file
