@@ -309,6 +309,32 @@ def test_build_item_pointcloud(tmp_path, write_las):
     assert asset.extra_fields["file:checksum"].startswith("1220")
 
 
+def test_build_item_pointcloud_schemas_are_storage_types(tmp_path, write_las):
+    """opals reads intensity and scan angle as floats, scan angle in radians. The item publishes
+    what the LAS file stores: uint16 intensity, int8 (point format 0-5) or int16 (6+) scan angle
+    and the scan angle statistics in degrees."""
+    pytest.importorskip("opals")  # the pcl reader calls opalsInfo
+    for pf in (3, 6):
+        (tmp_path / f"pf{pf}").mkdir()
+    write_las(tmp_path / "pf3" / "pielach_2023-02-08_ground.las", point_format=3, intensity=(0, 60000), scan_angle=(-30, 30))
+    # raw int16 steps of 0.006 deg: +-3500 is +-21 deg
+    write_las(tmp_path / "pf6" / "pielach_2023-02-08_ground.las", point_format=6, scan_angle=(-3500, 3500))
+
+    pf3 = build_item(discover(tmp_path / "pf3")[0], CAMP, crs="EPSG:31256")
+    pf6 = build_item(discover(tmp_path / "pf6")[0], CAMP, crs="EPSG:31256")
+
+    schemas = {pf: {s["name"]: (s["size"], s["type"]) for s in it.properties["pc:schemas"]}
+               for pf, it in ((3, pf3), (6, pf6))}
+    assert schemas[3]["ScanAngle"] == (1, "signed") and schemas[3]["Amplitude"] == (2, "unsigned")
+    assert schemas[6]["ScanAngle"] == (2, "signed") and schemas[6]["Amplitude"] == (2, "unsigned")
+    def stat(item, name): return next(s for s in item.properties["pc:statistics"] if s["name"] == name)
+
+    assert (stat(pf6, "ScanAngle")["minimum"], stat(pf6, "ScanAngle")["maximum"]) == (-21.0, 21.0)
+    # whole degrees below point format 6, and only the scan angle is converted
+    assert (stat(pf3, "ScanAngle")["minimum"], stat(pf3, "ScanAngle")["maximum"]) == (-30.0, 30.0)
+    assert (stat(pf3, "Amplitude")["minimum"], stat(pf3, "Amplitude")["maximum"]) == (0, 60000)
+
+
 def test_build_item_pointcloud_filename_date_anchors_gps(tmp_path, write_las):
     pytest.importorskip("opals")  # the pcl reader calls opalsInfo
     # seconds of day in a file named two days before the campaign -> that day, not the campaign day

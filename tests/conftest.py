@@ -70,20 +70,26 @@ def _write_tif_no_crs(path, size: int = 4) -> None:
     ds = None
 
 
-def _write_las(path, n=800, dx=0.0, dy=0.0, gps=None):
+def _write_las(path, n=800, dx=0.0, dy=0.0, gps=None, point_format=3, intensity=None, scan_angle=None):
     """100 x 50 tile of random points offset by (dx, dy); the corners pin the extent exactly.
     gps = (min, max) writes a linear GPSTime ramp, otherwise the dimension stays constant
-    (and extract drops it)."""
+    (and extract drops it). intensity and scan_angle = (min, max) write a linear ramp of the raw
+    values (scan_angle: int16 steps of 0.006 deg from point format 6, whole degrees below)."""
     import laspy
     import numpy as np
     rng = np.random.default_rng(0)
     x = dx + np.concatenate([rng.uniform(0, 100, n), [0.0, 100.0, 0.0, 100.0]])
     y = dy + np.concatenate([rng.uniform(0, 50, n), [0.0, 0.0, 50.0, 50.0]])
     z = np.concatenate([rng.uniform(0, 10, n), [0.0, 0.0, 0.0, 0.0]])
-    las = laspy.LasData(laspy.LasHeader(point_format=3))
+    las = laspy.LasData(laspy.LasHeader(point_format=point_format))
     las.x, las.y, las.z = x, y, z
     if gps:
         las.gps_time = np.linspace(gps[0], gps[1], len(x))
+    if intensity:
+        las.intensity = np.linspace(*intensity, len(x)).astype(np.uint16)
+    if scan_angle:
+        field = "scan_angle" if point_format >= 6 else "scan_angle_rank"
+        setattr(las, field, np.linspace(*scan_angle, len(x)).round().astype(np.int16 if point_format >= 6 else np.int8))
     las.write(str(path))
 
 

@@ -17,7 +17,7 @@ import numpy as np
 GPS_EPOCH = datetime(1980, 1, 6, tzinfo=timezone.utc)
 WEEK = timedelta(weeks=1)
 
-# opals attribute name in the item -> pdal dimension name, factor from pdal to opals units
+# opals attribute name in the item -> pdal dimension name, factor from pdal to catalog units
 PDAL_DIMS = {
     "Amplitude":           ("Intensity", 1),
     "EchoNumber":          ("ReturnNumber", 1),
@@ -26,7 +26,7 @@ PDAL_DIMS = {
     "ScanDirection":       ("ScanDirectionFlag", 1),
     "EdgeOfFlightLine":    ("EdgeOfFlightLine", 1),
     "Classification":      ("Classification", 1),
-    "ScanAngle":           ("ScanAngleRank", math.pi / 180),  # pdal degrees, opals radians
+    "ScanAngle":           ("ScanAngleRank", 1),  # pdal and catalog degrees
     "UserData":            ("UserData", 1),
     "PointSourceId":       ("PointSourceId", 1),
     "GPSTime":             ("GpsTime", 1),

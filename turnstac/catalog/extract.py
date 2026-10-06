@@ -487,6 +487,7 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
     returns:
       AssetMeta object
     """
+    import laspy
     from opals import Info  # module import here keeps extract usable without opals
 
     log.debug(f"extracting pointcloud metadata: {path}")
@@ -513,10 +514,18 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
         for a in attributes
         if a.getMin() != a.getMax()  # constant dims carry no signal
     ]
+    for s in statistics:
+        if s["name"] == "ScanAngle":  # opals radians, LAS degrees
+            s.update(
+                {
+                    k: math.degrees(s[k])
+                    for k in ("minimum", "maximum", "average", "stddev")
+                    if s[k] is not None
+                }
+            )
     statistics = [{k: _r(v) for k, v in s.items() if v is not None} for s in statistics]
 
-    # every attribute opals reports, unfiltered. Reader types, not storage types (known limitation):
-    # Amplitude and ScanAngle come as float, X/Y/Z are not listed
+    # every attribute opals reports, unfiltered, X/Y/Z are not listed
     schemas = [
         {
             "name": _attr_name(a),
@@ -525,6 +534,14 @@ def pointcloud(path: str, crs: str | None = None) -> AssetMeta:
         }
         for a in attributes  # constant dimns are still extracted
     ]
+
+    # opals reads these two as float, the file stores them as integers; ColumnType ints as above
+    with laspy.open(str(path)) as r:
+        point_format = r.header.point_format.id
+    stored = {"Amplitude": (2, 5), "ScanAngle": (2, 4) if point_format >= 6 else (1, 2)}
+    for s in schemas:
+        if s["name"] in stored:
+            s["size"], s["type"] = stored[s["name"]]
 
     # raw GPSTime, resolved to UTC in build; found by shortname so the display
     # name stays free; constant GPSTime is filtered out
