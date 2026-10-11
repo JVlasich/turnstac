@@ -7,6 +7,7 @@ and everything else to the data root.
 
 Usage: python serve_catalog.py DATA_ROOT REPO_ROOT [PORT]
 """
+import os
 import sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
@@ -24,7 +25,11 @@ class Handler(SimpleHTTPRequestHandler):
         clean = path.split("?", 1)[0].split("#", 1)[0]
         is_browser = clean == "/browser" or clean.startswith("/browser/")
         self.directory = repo_root if is_browser else data_root
-        return super().translate_path(path)
+        local = super().translate_path(path)
+        # browser routes (history mode) have no file behind them: serve the app shell
+        if is_browser and not os.path.exists(local):
+            return os.path.join(repo_root, "browser", "index.html")
+        return local
 
 
 print(f"Serving {data_root} (browser from {repo_root}) at http://localhost:{port}/browser/")
